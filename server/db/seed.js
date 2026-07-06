@@ -1,0 +1,67 @@
+import { initDb, dbRun, dbGet } from './db.js';
+import { mockProducts } from '../../src/mockProducts.js';
+
+const seed = async () => {
+  try {
+    console.log('Initializing database tables...');
+    await initDb();
+
+    console.log('Seeding mock brands...');
+    for (const prod of mockProducts) {
+      if (prod.brand) {
+        const cleanBrand = prod.brand.trim();
+        await dbRun('INSERT OR IGNORE INTO brands (name) VALUES (?)', [cleanBrand]);
+      }
+    }
+
+    console.log('Seeding mock products...');
+    for (const prod of mockProducts) {
+      // Check if product already exists
+      const existing = await dbGet('SELECT id FROM products WHERE id = ?', [prod.id]);
+      if (existing) {
+        console.log(`Product ID ${prod.id} already exists. Skipping.`);
+        continue;
+      }
+
+      let brandId = null;
+      if (prod.brand) {
+        const brandRow = await dbGet('SELECT id FROM brands WHERE name = ?', [prod.brand.trim()]);
+        if (brandRow) {
+          brandId = brandRow.id;
+        }
+      }
+
+      await dbRun(
+        `INSERT INTO products (
+          id, title, brand, brand_id, category, price, condition, stock_quantity,
+          images, description, specifications, useCases, strengths, ratings, reviews
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          prod.id,
+          prod.title,
+          prod.brand,
+          brandId,
+          prod.category,
+          prod.price,
+          prod.condition,
+          prod.stock_quantity,
+          JSON.stringify(prod.images || []),
+          prod.description,
+          prod.specifications || '{}',
+          JSON.stringify(prod.useCases || []),
+          JSON.stringify(prod.strengths || []),
+          JSON.stringify(prod.ratings || {}),
+          JSON.stringify(prod.reviews || [])
+        ]
+      );
+      console.log(`Seeded product: ${prod.title}`);
+    }
+    console.log('Database seeded successfully!');
+    process.exit(0);
+  } catch (error) {
+    console.error('Seeding database failed:', error);
+    process.exit(1);
+  }
+};
+
+seed();

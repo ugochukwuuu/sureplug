@@ -1,0 +1,30 @@
+{
+  "name": "sureplug",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev:frontend": "vite",
+    "dev:backend": "node --watch server/server.js",
+    "dev": "concurrently -n \"frontend,backend\" -c \"cyan,green\" \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "build": "vite build",
+    "start": "node server/server.js",
+    "seed": "node server/db/seed.js",
+    "test": "node server/tests/checkout.test.js"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "pinia": "^3.0.4",
+    "sqlite3": "^6.0.1",
+    "vue": "^3.5.39",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.7",
+    "concurrently": "^10.0.3",
+    "vite": "^8.1.1"
+  }
+}
