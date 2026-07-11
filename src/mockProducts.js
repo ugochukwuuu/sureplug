@@ -33,35 +33,7 @@ export const mockProducts = [
       Performance: 8.5,
       ValueForMoney: 9.0
     },
-    reviews: [
-      {
-        id: 101,
-        reviewer_name: 'Chinedu A.',
-        reviewer_avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=100',
-        reviewer_university: 'Unilag',
-        reviewer_year: '300L',
-        rating: 5,
-        comment: "Bought this for my 300L project work, it hasn't let me down once."
-      },
-      {
-        id: 102,
-        reviewer_name: 'Deborah I.',
-        reviewer_avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100',
-        reviewer_university: 'Babcock University',
-        reviewer_year: '400L',
-        rating: 5,
-        comment: 'Battery is crazy good, I can go all day on campus without stress.'
-      },
-      {
-        id: 103,
-        reviewer_name: 'Tobi O.',
-        reviewer_avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100',
-        reviewer_university: 'Covenant University',
-        reviewer_year: '200L',
-        rating: 4,
-        comment: 'Super fast and lightweight. Perfect for lectures and editing.'
-      }
-    ]
+    reviews: []
   },
   {
     id: 2,

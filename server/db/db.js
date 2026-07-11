@@ -112,9 +112,101 @@ export const initDb = async () => {
       items_json TEXT NOT NULL,
       total_amount REAL NOT NULL,
       status TEXT DEFAULT 'pending',
+      total_amount_kobo INTEGER NOT NULL DEFAULT 0,
+      payment_status TEXT DEFAULT 'pending',
+      fulfillment_status TEXT DEFAULT 'unfulfilled',
+      payment_reference TEXT,
+      provider_name TEXT DEFAULT 'kora',
+      provider_transaction_id TEXT,
+      provider_payment_method TEXT,
+      provider_paid_at DATETIME,
+      provider_response_code TEXT,
+      idempotency_key TEXT,
+      checkout_url TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+
+  // 6. Create payment_events table
+  await dbRun(`
+    CREATE TABLE IF NOT EXISTS payment_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      payment_reference TEXT NOT NULL,
+      event_hash TEXT UNIQUE NOT NULL,
+      event_type TEXT NOT NULL,
+      provider_status TEXT,
+      headers TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      verification_duration_ms INTEGER,
+      received_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // 7. Create inventory_movements table
+  await dbRun(`
+    CREATE TABLE IF NOT EXISTS inventory_movements (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL,
+      change INTEGER NOT NULL,
+      event TEXT NOT NULL,
+      reference TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // 8. Create reviews table
+  await dbRun(`
+    CREATE TABLE IF NOT EXISTS reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      product_id INTEGER NOT NULL,
+      order_reference TEXT NOT NULL,
+      reviewer_name TEXT NOT NULL,
+      reviewer_university TEXT,
+      rating INTEGER NOT NULL CHECK(rating >= 1 AND rating <= 5),
+      comment TEXT NOT NULL,
+      is_flagged INTEGER DEFAULT 0,
+      is_reported INTEGER DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (product_id) REFERENCES products(id),
+      FOREIGN KEY (order_reference) REFERENCES orders(payment_reference),
+      UNIQUE (product_id, order_reference)
+    )
+  `);
+
+  // Migrate existing reviews if columns are missing
+  const reviewColumns = await dbAll('PRAGMA table_info(reviews)');
+  if (!reviewColumns.some(col => col.name === 'is_reported')) {
+    console.log('Migrating reviews schema: Adding is_reported column...');
+    await dbRun('ALTER TABLE reviews ADD COLUMN is_reported INTEGER DEFAULT 0');
+  }
+
+  // Migrate existing orders if table columns are missing
+  const orderColumns = await dbAll('PRAGMA table_info(orders)');
+  const addColumnIfMissing = async (colName, colDef) => {
+    if (!orderColumns.some(col => col.name === colName)) {
+      console.log(`Migrating orders schema: Adding ${colName} column...`);
+      await dbRun(`ALTER TABLE orders ADD COLUMN ${colName} ${colDef}`);
+    }
+  };
+
+  await addColumnIfMissing('total_amount_kobo', 'INTEGER NOT NULL DEFAULT 0');
+  await addColumnIfMissing('payment_status', "TEXT DEFAULT 'pending'");
+  await addColumnIfMissing('fulfillment_status', "TEXT DEFAULT 'unfulfilled'");
+  await addColumnIfMissing('payment_reference', 'TEXT');
+  await addColumnIfMissing('provider_name', "TEXT DEFAULT 'kora'");
+  await addColumnIfMissing('provider_transaction_id', 'TEXT');
+  await addColumnIfMissing('provider_payment_method', 'TEXT');
+  await addColumnIfMissing('provider_paid_at', 'DATETIME');
+  await addColumnIfMissing('provider_response_code', 'TEXT');
+  await addColumnIfMissing('idempotency_key', 'TEXT');
+  await addColumnIfMissing('checkout_url', 'TEXT');
+
+  // Create unique indexes for unique fields to bypass SQLite's ALTER TABLE constraint limitations
+  await dbRun('CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_payment_reference ON orders(payment_reference)');
+  await dbRun('CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_provider_transaction_id ON orders(provider_transaction_id)');
+  await dbRun('CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_idempotency_key ON orders(idempotency_key)');
+
 
   // 5. Dynamic migration check for existing databases
   const columns = await dbAll('PRAGMA table_info(products)');
@@ -160,6 +252,11 @@ export const initDb = async () => {
     }
     console.log('Brand data migration completed.');
   }
+
+  // Align product availability values with stock quantities to heal stale or null db values
+  console.log('Aligning product availability values with stock quantities...');
+  await dbRun('UPDATE products SET is_available = 1 WHERE stock_quantity > 0');
+  await dbRun('UPDATE products SET is_available = 0 WHERE stock_quantity <= 0 OR stock_quantity IS NULL');
 };
 
 export default db;

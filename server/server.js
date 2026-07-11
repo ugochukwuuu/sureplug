@@ -9,6 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { initDb, dbGet, dbAll, dbRun } from './db/db.js';
 import {
   getAllProducts,
@@ -20,6 +21,8 @@ import {
 } from './db/products.js';
 import { authMiddleware } from './middleware/auth.js';
 import { categoriesList } from './config/categories.js';
+import { initializePayment, processWebhook, verifyPayment } from './payments/paymentService.js';
+import { sendOrderConfirmationEmail, sendShipmentNotificationEmail } from './services/email.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,7 +30,50 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
+
+// Correlation ID middleware
+app.use((req, res, next) => {
+  const correlationId = req.headers['x-correlation-id'] || req.headers['x-request-id'] || crypto.randomUUID();
+  req.correlationId = correlationId;
+  res.setHeader('X-Correlation-ID', correlationId);
+  next();
+});
+
+// Simple NAT-friendly in-memory rate limiter
+const rateLimits = new Map();
+const rateLimiter = (limit = 60, windowMs = 60000) => {
+  return (req, res, next) => {
+    const ip = req.ip || req.socket.remoteAddress;
+    const sessionKey = req.body?.idempotencyKey || req.query?.reference || 'anon';
+    const clientKey = `${ip}_${sessionKey}`;
+
+    const now = Date.now();
+    const clientRecord = rateLimits.get(clientKey);
+
+    if (!clientRecord) {
+      rateLimits.set(clientKey, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+
+    if (now > clientRecord.resetAt) {
+      rateLimits.set(clientKey, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+
+    clientRecord.count++;
+    if (clientRecord.count > limit) {
+      console.warn(`[TraceID: ${req.correlationId}] Rate limit exceeded for client key: ${clientKey}`);
+      return res.status(429).json({ error: 'Too many requests. Please try again later.' });
+    }
+
+    next();
+  };
+};
 
 // Seed super admin allowed emails
 const seedSuperAdmins = async () => {
@@ -130,7 +176,7 @@ const resolveBrandId = async (brandId, brandName) => {
 // REST endpoints for product CRUD
 app.get('/api/products', async (req, res) => {
   try {
-    const { category, minPrice, maxPrice, brand, condition, sortBy, search, page, limit, isAdmin } = req.query;
+    const { category, minPrice, maxPrice, brand, condition, sortBy, search, page, limit, includeUnavailable } = req.query;
     
     let query = `
       SELECT p.*, b.name AS brand 
@@ -146,7 +192,7 @@ app.get('/api/products', async (req, res) => {
     const params = [];
 
     // Availability filter (general storefront only shows available items)
-    if (isAdmin !== 'true') {
+    if (includeUnavailable !== 'true') {
       conditions.push('p.is_available = 1');
     }
 
@@ -268,6 +314,174 @@ app.get('/api/products/:id', async (req, res) => {
   } catch (err) {
     console.error('Error fetching product detail:', err);
     res.status(500).json({ error: 'Failed to fetch product details' });
+  }
+});
+
+// GET validate order reference and product combination before showing review form
+app.get('/api/reviews/validate', async (req, res) => {
+  const { ref, product } = req.query;
+  const productId = parseInt(product, 10);
+
+  if (!ref || isNaN(productId)) {
+    return res.json({ valid: false, error: 'Order reference and product ID are required.' });
+  }
+
+  try {
+    // 1. Check if order reference exists
+    const order = await dbGet('SELECT * FROM orders WHERE payment_reference = ?', [ref]);
+    if (!order) {
+      return res.json({ valid: false, error: 'Invalid order reference. Order not found.' });
+    }
+
+    // 2. Check payment status
+    if (order.payment_status !== 'paid') {
+      return res.json({ valid: false, error: 'Order is not paid yet. Reviews can only be left for paid purchases.' });
+    }
+
+    // 3. Check if order contains the product
+    let items = [];
+    try {
+      items = JSON.parse(order.items_json || '[]');
+    } catch (e) {
+      return res.json({ valid: false, error: 'Order items payload is corrupt.' });
+    }
+
+    const hasProduct = items.some(item => parseInt(item.id, 10) === productId);
+    if (!hasProduct) {
+      return res.json({ valid: false, error: 'This order does not contain the specified product.' });
+    }
+
+    // 4. Check if a review already exists
+    const existingReview = await dbGet(
+      'SELECT id FROM reviews WHERE product_id = ? AND order_reference = ?',
+      [productId, ref]
+    );
+    if (existingReview) {
+      return res.json({ valid: false, error: 'You have already reviewed this product for this purchase.' });
+    }
+
+    res.json({ valid: true, customerName: order.customer_name });
+  } catch (err) {
+    console.error('Error validating review:', err);
+    res.status(500).json({ valid: false, error: 'Internal server error validating review.' });
+  }
+});
+
+// GET non-flagged reviews for a product
+app.get('/api/products/:id/reviews', async (req, res) => {
+  const productId = parseInt(req.params.id, 10);
+
+  try {
+    const reviews = await dbAll(
+      `SELECT id, reviewer_name, reviewer_university, rating, comment, created_at 
+       FROM reviews 
+       WHERE product_id = ? AND is_flagged = 0 
+       ORDER BY created_at DESC`,
+      [productId]
+    );
+
+    const stats = await dbGet(
+      `SELECT COUNT(*) as count, AVG(rating) as avgRating 
+       FROM reviews 
+       WHERE product_id = ? AND is_flagged = 0`,
+      [productId]
+    );
+
+    res.json({
+      reviews,
+      totalReviewCount: stats ? stats.count : 0,
+      averageRating: stats && stats.avgRating ? parseFloat(stats.avgRating.toFixed(1)) : 0
+    });
+  } catch (err) {
+    console.error('Error fetching reviews:', err);
+    res.status(500).json({ error: 'Failed to fetch reviews.' });
+  }
+});
+
+// POST save verified purchase review
+app.post('/api/products/:id/reviews', async (req, res) => {
+  const productId = parseInt(req.params.id, 10);
+  const { order_reference, rating, comment } = req.body;
+  const ratingInt = parseInt(rating, 10);
+
+  if (!order_reference || isNaN(ratingInt) || !comment) {
+    return res.status(400).json({ error: 'Missing required review fields.' });
+  }
+
+  if (ratingInt < 1 || ratingInt > 5) {
+    return res.status(400).json({ error: 'Rating must be between 1 and 5.' });
+  }
+
+  if (comment.trim().length < 10) {
+    return res.status(400).json({ error: 'Review comment must be at least 10 characters long.' });
+  }
+
+  try {
+    // 1. Verify order reference
+    const order = await dbGet('SELECT * FROM orders WHERE payment_reference = ?', [order_reference]);
+    if (!order) {
+      return res.status(400).json({ error: 'Invalid order reference.' });
+    }
+
+    // 2. Verify payment status
+    if (order.payment_status !== 'paid') {
+      return res.status(400).json({ error: 'Order is not paid.' });
+    }
+
+    // 3. Verify order contains product_id
+    let items = [];
+    try {
+      items = JSON.parse(order.items_json || '[]');
+    } catch (e) {
+      return res.status(500).json({ error: 'Failed to parse order items.' });
+    }
+
+    const hasProduct = items.some(item => parseInt(item.id, 10) === productId);
+    if (!hasProduct) {
+      return res.status(400).json({ error: 'This product was not purchased in this order.' });
+    }
+
+    // 4. Verify review doesn't exist
+    const existing = await dbGet(
+      'SELECT id FROM reviews WHERE product_id = ? AND order_reference = ?',
+      [productId, order_reference]
+    );
+    if (existing) {
+      return res.status(400).json({ error: 'A review has already been submitted for this product with this order.' });
+    }
+
+    // Auto-fill reviewer name from order record securely
+    const reviewer_name = order.customer_name;
+
+    // Save review (university option removed, inserted as NULL)
+    await dbRun(
+      `INSERT INTO reviews (product_id, order_reference, reviewer_name, reviewer_university, rating, comment, is_flagged)
+       VALUES (?, ?, ?, NULL, ?, ?, 0)`,
+      [productId, order_reference, reviewer_name.trim(), ratingInt, comment.trim()]
+    );
+
+    res.status(201).json({ success: true, message: 'Review saved successfully.' });
+  } catch (err) {
+    console.error('Error saving review:', err);
+    res.status(500).json({ error: 'Failed to save review.' });
+  }
+});
+
+// POST report / flag a review (marks it as reported, keeps it public until admin-flagged)
+app.post('/api/reviews/:id/report', async (req, res) => {
+  const reviewId = parseInt(req.params.id, 10);
+
+  try {
+    const existing = await dbGet('SELECT id FROM reviews WHERE id = ?', [reviewId]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Review not found.' });
+    }
+
+    await dbRun('UPDATE reviews SET is_reported = 1 WHERE id = ?', [reviewId]);
+    res.json({ success: true, message: 'Review reported successfully.' });
+  } catch (err) {
+    console.error('Error reporting review:', err);
+    res.status(500).json({ error: 'Failed to report review.' });
   }
 });
 
@@ -847,8 +1061,12 @@ app.delete('/api/admin/allowed-emails/:email', authMiddleware, async (req, res) 
 });
 
 // Checkout API Endpoint
-app.post('/api/checkout', async (req, res) => {
-  const { cartItems, deliveryInfo, paymentMethod, deliveryMethod } = req.body;
+app.post('/api/checkout', rateLimiter(15, 60000), async (req, res) => {
+  const { cartItems, deliveryInfo, paymentMethod, deliveryMethod, idempotencyKey } = req.body;
+
+  if (!idempotencyKey) {
+    return res.status(400).json({ error: 'Idempotency key is required.' });
+  }
 
   if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
     return res.status(400).json({ error: 'Cart is empty or invalid.' });
@@ -862,10 +1080,37 @@ app.post('/api/checkout', async (req, res) => {
     return res.status(400).json({ error: 'Payment method is required.' });
   }
 
+  console.log(`[TraceID: ${req.correlationId}] Checkout requested. Idempotency Key: ${idempotencyKey}`);
+
   try {
-    // 1. Validate all products existence and stock availability first
-    const productsToUpdate = [];
-    let calculatedTotal = 0;
+    // 1. Idempotency Check: Retrieve existing order if key matches
+    const existing = await dbGet(
+      'SELECT id, checkout_url, payment_reference, payment_method FROM orders WHERE idempotency_key = ?',
+      [idempotencyKey]
+    );
+    if (existing) {
+      const isStaleOnlineOrder = (existing.payment_method === 'card' || existing.payment_method === 'transfer') &&
+                                 !existing.checkout_url &&
+                                 !existing.payment_reference;
+
+      if (isStaleOnlineOrder) {
+        console.log(`[TraceID: ${req.correlationId}] Found stale payment session (order #${existing.id}) with null credentials. Deleting stale record to retry.`);
+        await dbRun('DELETE FROM orders WHERE id = ?', [existing.id]);
+      } else {
+        console.log(`[TraceID: ${req.correlationId}] Matching idempotency key found. Returning existing payment URL.`);
+        return res.json({
+          success: true,
+          orderId: existing.id,
+          checkoutUrl: existing.checkout_url,
+          paymentReference: existing.payment_reference,
+          message: 'Retrieved existing active payment session.'
+        });
+      }
+    }
+
+    // 2. Validate products and calculate price totals strictly in integer kobo
+    let calculatedTotalKobo = 0;
+    const productsList = [];
 
     for (const item of cartItems) {
       const product = await dbGet('SELECT * FROM products WHERE id = ?', [item.id]);
@@ -873,67 +1118,280 @@ app.post('/api/checkout', async (req, res) => {
         return res.status(400).json({ error: `Product with ID ${item.id} not found.` });
       }
 
-      if (product.is_available === 0) {
-        return res.status(400).json({ error: `Product '${product.title}' is currently unavailable.` });
+      if (product.is_available === 0 || !product.is_available) {
+        return res.status(400).json({ error: 'Sorry, this product is no longer available.' });
       }
 
-      if (product.stock_quantity < item.quantity) {
-        return res.status(400).json({ error: `Insufficient stock for '${product.title}'. Available: ${product.stock_quantity}, Requested: ${item.quantity}.` });
-      }
-
-      productsToUpdate.push({
+      const priceKobo = Math.round(product.price * 100);
+      calculatedTotalKobo += priceKobo * item.quantity;
+      productsList.push({
         id: product.id,
         title: product.title,
         price: product.price,
-        quantity: item.quantity,
-        newStock: product.stock_quantity - item.quantity
+        quantity: item.quantity
       });
-
-      calculatedTotal += product.price * item.quantity;
     }
 
-    // Apply delivery fee calculation
-    const isExpress = (deliveryMethod === 'express');
-    const deliveryFee = isExpress ? 2500 : 0;
-    
-    // Apply promo discounts if applicable
-    let finalTotal = calculatedTotal + deliveryFee;
+    // Calculate delivery fee in kobo: standard (0 kobo), express (250,000 kobo)
+    const deliveryFeeKobo = (deliveryMethod === 'express') ? 250000 : 0;
+    const finalTotalKobo = calculatedTotalKobo + deliveryFeeKobo;
 
-    // 2. Perform database stock updates and order insertion
-    for (const item of productsToUpdate) {
-      await dbRun('UPDATE products SET stock_quantity = ?, is_available = CASE WHEN ? = 0 THEN 0 ELSE is_available END WHERE id = ?', [item.newStock, item.newStock, item.id]);
+    const itemsJson = JSON.stringify(productsList);
+
+    const isOnlinePayment = paymentMethod === 'card' || paymentMethod === 'transfer';
+
+    if (isOnlinePayment) {
+      await dbRun('BEGIN IMMEDIATE');
     }
 
-    const itemsJson = JSON.stringify(productsToUpdate.map(p => ({ id: p.id, title: p.title, price: p.price, quantity: p.quantity })));
-    
-    const result = await dbRun(
-      `INSERT INTO orders (
-        customer_name, customer_phone, customer_email, delivery_address, delivery_state, delivery_landmark,
-        delivery_method, payment_method, items_json, total_amount, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        deliveryInfo.fullName.trim(),
-        deliveryInfo.phone.trim(),
-        deliveryInfo.email.trim().toLowerCase(),
-        deliveryInfo.address.trim(),
-        deliveryInfo.state.trim(),
-        (deliveryInfo.landmark || '').trim(),
-        deliveryMethod || 'standard',
-        paymentMethod,
-        itemsJson,
-        finalTotal,
-        'pending'
-      ]
+    try {
+      // 3. Store Order record inside database in 'pending' state
+      const paymentReference = crypto.randomUUID();
+      const result = await dbRun(
+        `INSERT INTO orders (
+          customer_name, customer_phone, customer_email, delivery_address, delivery_state, delivery_landmark,
+          delivery_method, payment_method, items_json, total_amount, total_amount_kobo, payment_status, fulfillment_status, idempotency_key, payment_reference
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          deliveryInfo.fullName.trim(),
+          deliveryInfo.phone.trim(),
+          deliveryInfo.email.trim().toLowerCase(),
+          deliveryInfo.address.trim(),
+          deliveryInfo.state.trim(),
+          (deliveryInfo.landmark || '').trim(),
+          deliveryMethod || 'standard',
+          paymentMethod,
+          itemsJson,
+          finalTotalKobo / 100, // standard decimal conversion
+          finalTotalKobo,
+          'pending',
+          'unfulfilled',
+          idempotencyKey,
+          paymentReference
+        ]
+      );
+
+      // 4. Initialize Payment gateway session if paying online (card or transfer)
+      if (isOnlinePayment) {
+        const frontendBase = process.env.FRONTEND_URL || 'http://localhost:5173';
+        const redirectUrl = `${frontendBase}/checkout?verifying=true&reference=`;
+
+        const { checkoutUrl, paymentReference: finalReference } = await initializePayment({
+          orderId: result.id,
+          paymentReference,
+          amountKobo: finalTotalKobo,
+          customer: {
+            name: deliveryInfo.fullName.trim(),
+            email: deliveryInfo.email.trim().toLowerCase(),
+            phone: deliveryInfo.phone.trim()
+          },
+          redirectUrl: `${redirectUrl}`,
+          correlationId: req.correlationId
+        });
+
+        await dbRun('COMMIT');
+
+        return res.status(201).json({
+          success: true,
+          orderId: result.id,
+          checkoutUrl,
+          paymentReference: finalReference,
+          message: `Order #${result.id} initialized successfully.`
+        });
+      } else {
+        // Pay on Delivery - Settle immediately inside atomic transaction
+        await dbRun('BEGIN IMMEDIATE');
+        try {
+          let isAllAvailable = true;
+
+          for (const item of productsList) {
+            const prod = await dbGet('SELECT title, is_available FROM products WHERE id = ?', [item.id]);
+            if (!prod || prod.is_available === 0) {
+              isAllAvailable = false;
+              break;
+            }
+          }
+
+          if (!isAllAvailable) {
+            await dbRun('ROLLBACK');
+            return res.status(400).json({ error: 'Sorry, one or more items in your cart are no longer available.' });
+          }
+
+          // Update statuses
+          await dbRun(
+            `UPDATE orders 
+             SET payment_status = 'pending', fulfillment_status = 'pending' 
+             WHERE id = ?`,
+            [result.id]
+          );
+
+          await dbRun('COMMIT');
+
+          // Trigger email notification for Pay on Delivery order in the background
+          dbGet('SELECT * FROM orders WHERE id = ?', [result.id]).then(updatedOrder => {
+            if (updatedOrder) {
+              sendOrderConfirmationEmail(updatedOrder).catch(err => {
+                console.error('[Server Checkout] Failed to send COD order confirmation email:', err);
+              });
+            }
+          }).catch(err => {
+            console.error('[Server Checkout] Failed to fetch updated order for COD email confirmation:', err);
+          });
+
+          return res.status(201).json({
+            success: true,
+            orderId: result.id,
+            paymentReference, // return the generated paymentReference for COD order tracking
+            message: `Order #${result.id} confirmed for Pay on Delivery.`
+          });
+        } catch (err) {
+          await dbRun('ROLLBACK');
+          throw err;
+        }
+      }
+    } catch (err) {
+      if (isOnlinePayment) {
+        await dbRun('ROLLBACK');
+      }
+      throw err;
+    }
+    } catch (err) {
+      console.error(`[TraceID: ${req.correlationId}] Checkout processing error:`, err.message || err);
+      if (err.statusCode) {
+        console.error(`[TraceID: ${req.correlationId}] Korapay Gateway Error Details - Status: ${err.statusCode}, Response Body:`, JSON.stringify(err.responseBody || {}));
+      }
+      res.status(500).json({ error: 'Failed to process checkout transaction.' });
+    }
+});
+
+// GET /api/orders/track/:reference (Public)
+app.get('/api/orders/track/:reference', async (req, res) => {
+  const { reference } = req.params;
+  if (!reference) {
+    return res.status(400).json({ error: 'Order reference parameter is required.' });
+  }
+
+  try {
+    const order = await dbGet(
+      `SELECT payment_reference, payment_status, fulfillment_status, customer_name, customer_phone, 
+              delivery_address, delivery_state, delivery_landmark, delivery_method, items_json, created_at 
+       FROM orders 
+       WHERE payment_reference = ?`,
+      [reference]
     );
 
-    res.status(201).json({
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+
+    // Mask phone number: e.g. 08123456789 -> 081****6789 or 080****1234
+    const phone = order.customer_phone || '';
+    let maskedPhone = '';
+    if (phone.length >= 7) {
+      maskedPhone = phone.substring(0, 3) + '****' + phone.substring(phone.length - 4);
+    } else {
+      maskedPhone = '***-***';
+    }
+
+    // Load images for items
+    let items = [];
+    try {
+      items = JSON.parse(order.items_json);
+      for (const item of items) {
+        const prod = await dbGet('SELECT images FROM products WHERE id = ?', [item.id]);
+        if (prod && prod.images) {
+          const imgs = JSON.parse(prod.images);
+          item.image = imgs[0] || '';
+        } else {
+          item.image = '';
+        }
+      }
+    } catch (e) {
+      console.error('Error parsing items JSON for tracking:', e);
+    }
+
+    return res.json({
       success: true,
-      orderId: result.id,
-      message: `Order #${result.id} processed successfully. Confirmed!`
+      order: {
+        reference: order.payment_reference,
+        paymentStatus: order.payment_status,
+        fulfillmentStatus: order.fulfillment_status,
+        customerName: order.customer_name,
+        customerPhone: maskedPhone,
+        deliveryAddress: order.delivery_address,
+        deliveryState: order.delivery_state,
+        deliveryLandmark: order.delivery_landmark,
+        deliveryMethod: order.delivery_method,
+        createdAt: order.created_at,
+        items
+      }
+    });
+
+  } catch (err) {
+    console.error(`[TraceID: ${req.correlationId}] Get guest tracking error:`, err);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// GET Order Checkout Status
+app.get('/api/checkout/status', rateLimiter(120, 60000), async (req, res) => {
+  const { reference } = req.query;
+  if (!reference) {
+    return res.status(400).json({ error: 'Payment reference parameter is required.' });
+  }
+
+  try {
+    let order = await dbGet(
+      'SELECT id, payment_status, fulfillment_status FROM orders WHERE payment_reference = ?',
+      [reference]
+    );
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+
+    // Backup check: If local status is pending, directly verify status with the payment provider
+    if (order.payment_status === 'pending') {
+      console.log(`[TraceID: ${req.correlationId}] Checkout status: local order #${order.id} is pending. Querying payment gateway directly as backup verification.`);
+      const verifyResult = await verifyPayment({ reference, correlationId: req.correlationId });
+      if (verifyResult.success) {
+        // Re-read updated order state
+        order = await dbGet(
+          'SELECT id, payment_status, fulfillment_status FROM orders WHERE payment_reference = ?',
+          [reference]
+        );
+      }
+    }
+
+    return res.json({
+      success: true,
+      orderId: order.id,
+      paymentStatus: order.payment_status,
+      fulfillmentStatus: order.fulfillment_status
     });
   } catch (err) {
-    console.error('Checkout error:', err);
-    res.status(500).json({ error: 'Failed to process checkout transaction.' });
+    console.error(`[TraceID: ${req.correlationId}] Get checkout status error:`, err);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Generic Webhook POST /api/payments/webhook
+app.post('/api/payments/webhook', rateLimiter(200, 60000), async (req, res) => {
+  try {
+    const result = await processWebhook({
+      headers: req.headers,
+      rawBody: req.rawBody || Buffer.from(JSON.stringify(req.body)),
+      correlationId: req.correlationId
+    });
+
+    if (result.success) {
+      return res.status(result.status || 200).json({ success: true, message: result.message });
+    } else {
+      // Prompt payment provider to retry if settlement logic fails or throws
+      return res.status(result.status || 500).json({ error: result.error });
+    }
+  } catch (err) {
+    console.error(`[TraceID: ${req.correlationId}] Fatal webhook processing exception:`, err);
+    return res.status(500).json({ error: 'Internal Webhook Settle Exception' });
   }
 });
 
@@ -968,13 +1426,235 @@ app.put('/api/admin/orders/:id/status', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'Order not found.' });
     }
 
-    await dbRun('UPDATE orders SET status = ? WHERE id = ?', [status.toLowerCase(), orderId]);
+    await dbRun(
+      `UPDATE orders 
+       SET status = ?, fulfillment_status = ? 
+       WHERE id = ?`,
+      [status.toLowerCase(), status.toLowerCase(), orderId]
+    );
     res.json({ success: true, message: `Order status updated to '${status.toLowerCase()}' successfully.` });
   } catch (err) {
     console.error('Error updating order status:', err);
     res.status(500).json({ error: 'Failed to update order status.' });
   }
 });
+
+// GET order statistics (Admin Protected)
+app.get('/api/admin/orders/stats', authMiddleware, async (req, res) => {
+  try {
+    const ordersTodayRow = await dbGet("SELECT COUNT(*) as count FROM orders WHERE date(created_at) = date('now')");
+    const revenueTodayRow = await dbGet("SELECT SUM(total_amount) as total FROM orders WHERE payment_status = 'paid' AND date(created_at) = date('now')");
+    const pendingFulfillmentsRow = await dbGet("SELECT COUNT(*) as count FROM orders WHERE fulfillment_status = 'pending'");
+    const deliveredAllTimeRow = await dbGet("SELECT COUNT(*) as count FROM orders WHERE fulfillment_status = 'delivered'");
+
+    res.json({
+      ordersToday: ordersTodayRow ? ordersTodayRow.count : 0,
+      revenueToday: revenueTodayRow && revenueTodayRow.total ? revenueTodayRow.total : 0,
+      pendingFulfillments: pendingFulfillmentsRow ? pendingFulfillmentsRow.count : 0,
+      deliveredAllTime: deliveredAllTimeRow ? deliveredAllTimeRow.count : 0
+    });
+  } catch (err) {
+    console.error('Error fetching admin orders stats:', err);
+    res.status(500).json({ error: 'Failed to fetch order statistics.' });
+  }
+});
+
+// PUT update order fulfillment status (Admin Protected)
+app.put('/api/admin/orders/:id/fulfillment', authMiddleware, async (req, res) => {
+  const { status } = req.body;
+  const orderId = parseInt(req.params.id, 10);
+
+  if (!status) {
+    return res.status(400).json({ error: 'Status is required in request body.' });
+  }
+
+  const validStatuses = ['pending', 'processing', 'shipped', 'delivered'];
+  if (!validStatuses.includes(status.toLowerCase())) {
+    return res.status(400).json({ error: `Invalid fulfillment status. Must be one of: ${validStatuses.join(', ')}` });
+  }
+
+  try {
+    const order = await dbGet('SELECT * FROM orders WHERE id = ?', [orderId]);
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+
+    await dbRun(
+      `UPDATE orders 
+       SET fulfillment_status = ?, status = ? 
+       WHERE id = ?`,
+      [status.toLowerCase(), status.toLowerCase(), orderId]
+    );
+
+    if (status.toLowerCase() === 'shipped') {
+      const updatedOrder = await dbGet('SELECT * FROM orders WHERE id = ?', [orderId]);
+      sendShipmentNotificationEmail(updatedOrder).catch(err => {
+        console.error('[Server Fulfillment] Failed to send shipment notification email:', err);
+      });
+    }
+
+    res.json({ success: true, message: `Order fulfillment status updated to '${status.toLowerCase()}' successfully.` });
+  } catch (err) {
+    console.error('Error updating order fulfillment status:', err);
+    res.status(500).json({ error: 'Failed to update order fulfillment status.' });
+  }
+});
+
+// POST manually trigger payment reconciliation (Admin Protected)
+app.post('/api/admin/reconcile', authMiddleware, async (req, res) => {
+  const correlationId = `manual_reconcile_${Date.now()}`;
+  console.log(`[TraceID: ${correlationId}] Admin manually triggered reconciliation.`);
+  
+  try {
+    const unsettledOrders = await dbAll(
+      `SELECT id, payment_reference 
+       FROM orders 
+       WHERE payment_status = 'pending' 
+         AND created_at >= datetime('now', '-24 hours')
+       ORDER BY id ASC 
+       LIMIT 100`
+    );
+
+    let reconciledCount = 0;
+    for (const order of unsettledOrders) {
+      if (order.payment_reference) {
+        const check = await verifyPayment({
+          reference: order.payment_reference,
+          correlationId
+        });
+        if (check.success) {
+          reconciledCount++;
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Reconciliation check complete. Examined ${unsettledOrders.length} orders. Settled ${reconciledCount} orders.`
+    });
+  } catch (err) {
+    console.error(`[TraceID: ${correlationId}] Manual reconciliation failed:`, err);
+    return res.status(500).json({ error: 'Reconciliation runner exception.' });
+  }
+});
+
+// GET all reviews across products (Admin Protected)
+app.get('/api/admin/reviews', authMiddleware, async (req, res) => {
+  try {
+    const reviews = await dbAll(
+      `SELECT r.id, r.product_id, r.order_reference, r.reviewer_name, r.reviewer_university, 
+              r.rating, r.comment, r.is_flagged, r.is_reported, r.created_at, p.title as product_name
+       FROM reviews r
+       LEFT JOIN products p ON r.product_id = p.id
+       ORDER BY r.created_at DESC`
+    );
+    res.json(reviews);
+  } catch (err) {
+    console.error('Error fetching admin reviews list:', err);
+    res.status(500).json({ error: 'Failed to fetch reviews list.' });
+  }
+});
+
+// PUT toggle flagged status on a review (Admin Protected)
+app.put('/api/admin/reviews/:id/flag', authMiddleware, async (req, res) => {
+  const reviewId = parseInt(req.params.id, 10);
+
+  try {
+    const existing = await dbGet('SELECT is_flagged FROM reviews WHERE id = ?', [reviewId]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Review not found.' });
+    }
+
+    const newFlag = existing.is_flagged ? 0 : 1;
+    await dbRun('UPDATE reviews SET is_flagged = ? WHERE id = ?', [newFlag, reviewId]);
+
+    res.json({ success: true, is_flagged: newFlag, message: `Review flagged status updated to ${newFlag}.` });
+  } catch (err) {
+    console.error('Error toggling review flag:', err);
+    res.status(500).json({ error: 'Failed to update review flag status.' });
+  }
+});
+
+// PUT dismiss reported status on a review (Admin Protected)
+app.put('/api/admin/reviews/:id/dismiss', authMiddleware, async (req, res) => {
+  const reviewId = parseInt(req.params.id, 10);
+
+  try {
+    const existing = await dbGet('SELECT id FROM reviews WHERE id = ?', [reviewId]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Review not found.' });
+    }
+
+    await dbRun('UPDATE reviews SET is_reported = 0 WHERE id = ?', [reviewId]);
+    res.json({ success: true, message: 'Review reported status dismissed.' });
+  } catch (err) {
+    console.error('Error dismissing review report:', err);
+    res.status(500).json({ error: 'Failed to dismiss review report.' });
+  }
+});
+
+// DELETE permanently delete a review (Admin Protected)
+app.delete('/api/admin/reviews/:id', authMiddleware, async (req, res) => {
+  const reviewId = parseInt(req.params.id, 10);
+
+  try {
+    const existing = await dbGet('SELECT id FROM reviews WHERE id = ?', [reviewId]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Review not found.' });
+    }
+
+    await dbRun('DELETE FROM reviews WHERE id = ?', [reviewId]);
+    res.json({ success: true, message: 'Review permanently deleted.' });
+  } catch (err) {
+    console.error('Error deleting review:', err);
+    res.status(500).json({ error: 'Failed to delete review.' });
+  }
+});
+
+// Hourly Paginated Reconciliation Task
+const runHourlyReconciliation = async () => {
+  const correlationId = `reconcile_${Date.now()}`;
+  console.log(`[TraceID: ${correlationId}] Starting hourly paginated reconciliation job.`);
+  
+  try {
+    const unsettledOrders = await dbAll(
+      `SELECT id, payment_reference 
+       FROM orders 
+       WHERE payment_status = 'pending' 
+         AND created_at >= datetime('now', '-24 hours')
+       ORDER BY id ASC 
+       LIMIT 50`
+    );
+
+    console.log(`[TraceID: ${correlationId}] Found ${unsettledOrders.length} pending orders to reconcile.`);
+    
+    for (const order of unsettledOrders) {
+      if (order.payment_reference) {
+        await verifyPayment({
+          reference: order.payment_reference,
+          correlationId
+        }).catch(err => {
+          console.error(`[TraceID: ${correlationId}] Error reconciling Order #${order.id}:`, err);
+        });
+      }
+    }
+  } catch (err) {
+    console.error(`[TraceID: ${correlationId}] Reconciliation job failed:`, err);
+  }
+};
+
+const scheduleReconciliation = () => {
+  const now = new Date();
+  const nextHour = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours() + 1, 0, 0, 0);
+  const timeToNextHour = nextHour - now;
+  
+  setTimeout(() => {
+    runHourlyReconciliation();
+    setInterval(runHourlyReconciliation, 3600000);
+  }, timeToNextHour);
+};
+
+scheduleReconciliation();
 
 // Serve built static assets in production
 app.use(express.static(path.join(__dirname, '../dist')));

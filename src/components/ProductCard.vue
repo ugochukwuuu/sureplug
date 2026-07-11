@@ -64,6 +64,9 @@ const getImageUrl = (images) => {
         <span class="badge" :class="product.condition === 'New' ? 'badge-new' : 'badge-used'">
           {{ product.condition }}
         </span>
+        <span v-if="product.is_available === false" class="badge badge-unavailable">
+          Currently Unavailable
+        </span>
       </div>
       
       <h3 class="product-card-title">{{ product.title }}</h3>
@@ -72,7 +75,12 @@ const getImageUrl = (images) => {
       <div class="product-card-footer">
         <div class="product-card-price">{{ formatPrice(product.price) }}</div>
         
-        <button class="btn btn-navy product-card-btn" @click="handleAddToCart">
+        <button 
+          class="btn btn-navy product-card-btn" 
+          :class="{ 'btn-disabled': product.is_available === false }"
+          :disabled="product.is_available === false"
+          @click="handleAddToCart"
+        >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="9" cy="21" r="1"></circle>
             <circle cx="20" cy="21" r="1"></circle>
@@ -135,5 +143,20 @@ const getImageUrl = (images) => {
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+}
+
+.badge-unavailable {
+  background-color: var(--color-bg) !important;
+  color: var(--color-muted-grey) !important;
+  border: 1px solid var(--color-border-light) !important;
+  opacity: 0.85;
+}
+
+.btn-disabled {
+  background-color: #E2E8F0 !important;
+  border-color: #E2E8F0 !important;
+  color: #94A3B8 !important;
+  cursor: not-allowed !important;
+  opacity: 0.7;
 }
 </style>

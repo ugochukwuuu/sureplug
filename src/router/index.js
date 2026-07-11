@@ -11,8 +11,21 @@ import AdminProductEditView from '../views/admin/AdminProductEditView.vue';
 import AdminLoginView from '../views/admin/AdminLoginView.vue';
 import AdminRegisterView from '../views/admin/AdminRegisterView.vue';
 import FavoritesView from '../views/FavoritesView.vue';
+import TrackOrderView from '../views/TrackOrderView.vue';
+import AdminOrdersView from '../views/admin/AdminOrdersView.vue';
+import ReviewView from '../views/ReviewView.vue';
 
 const routes = [
+  {
+    path: '/review',
+    name: 'Review',
+    component: ReviewView
+  },
+  {
+    path: '/track/:reference',
+    name: 'TrackOrder',
+    component: TrackOrderView
+  },
   {
     path: '/favorites',
     name: 'Favorites',
@@ -72,6 +85,11 @@ const routes = [
     path: '/admin/product/edit/:id',
     name: 'AdminProductEdit',
     component: AdminProductEditView
+  },
+  {
+    path: '/admin/orders',
+    name: 'AdminOrders',
+    component: AdminOrdersView
   },
   {
     path: '/:pathMatch(.*)*',

@@ -47,6 +47,7 @@ const handleLogout = () => {
         </router-link>
         <nav v-if="showAdminNav" class="admin-nav-links">
           <router-link to="/admin" class="admin-nav-link" exact-active-class="active">Dashboard</router-link>
+          <router-link to="/admin/orders" class="admin-nav-link" exact-active-class="active">Orders</router-link>
           <router-link to="/admin/product/new" class="admin-nav-link" exact-active-class="active">Add Product</router-link>
           <router-link to="/" class="admin-nav-link storefront-link">Storefront</router-link>
           <button @click="handleLogout" class="admin-logout-btn">Logout</button>
@@ -218,7 +219,10 @@ const handleLogout = () => {
   color: var(--color-muted-grey);
   transition: color 0.2s ease;
 }
-.admin-nav-link:hover, .admin-nav-link.active {
+.admin-nav-link:hover, 
+.admin-nav-link.active,
+.admin-nav-link.router-link-active,
+.admin-nav-link.router-link-exact-active {
   color: var(--color-yellow);
 }
 .storefront-link {

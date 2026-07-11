@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { mockProducts } from '../../mockProducts';
 
@@ -16,7 +16,7 @@ const productsList = ref([]);
 
 const loadProducts = async () => {
   try {
-    const res = await fetch('/api/products?isAdmin=true');
+    const res = await fetch('/api/products?includeUnavailable=true');
     if (res.ok) {
       productsList.value = await res.json();
     } else {
@@ -27,8 +27,168 @@ const loadProducts = async () => {
   }
 };
 
+const toggleAvailability = async (prod) => {
+  const originalState = prod.is_available;
+  prod.is_available = !prod.is_available;
+  
+  const token = localStorage.getItem('sureplug_admin_token');
+  try {
+    const res = await fetch(`/api/products/${prod.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        ...prod,
+        is_available: prod.is_available
+      })
+    });
+    
+    if (!res.ok) {
+      throw new Error('Failed to update product availability.');
+    }
+  } catch (err) {
+    console.error('Error toggling availability:', err);
+    prod.is_available = originalState;
+    alert('Failed to update product availability status.');
+  }
+};
+
 // Tab state
 const activeTab = ref('products');
+
+// Reviews Moderation states
+const adminReviewsList = ref([]);
+const adminReviewsLoading = ref(false);
+const filterFlaggedOnly = ref(false);
+const filterReportedOnly = ref(false);
+const selectedInspectReview = ref(null);
+const isInspectModalOpen = ref(false);
+
+const loadAdminReviews = async () => {
+  adminReviewsLoading.value = true;
+  const token = localStorage.getItem('sureplug_admin_token');
+  try {
+    const res = await fetch('/api/admin/reviews', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    if (res.ok) {
+      adminReviewsList.value = await res.json();
+    }
+  } catch (e) {
+    console.error('Error fetching admin reviews:', e);
+  } finally {
+    adminReviewsLoading.value = false;
+  }
+};
+
+const handleToggleFlag = async (reviewId) => {
+  const token = localStorage.getItem('sureplug_admin_token');
+  try {
+    const res = await fetch(`/api/admin/reviews/${reviewId}/flag`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const rev = adminReviewsList.value.find(r => r.id === reviewId);
+      if (rev) {
+        rev.is_flagged = data.is_flagged;
+      }
+      if (selectedInspectReview.value && selectedInspectReview.value.id === reviewId) {
+        selectedInspectReview.value.is_flagged = data.is_flagged;
+      }
+    } else {
+      alert('Failed to toggle review flag.');
+    }
+  } catch (e) {
+    console.error('Error toggling flag:', e);
+  }
+};
+
+const handleDismissReport = async (reviewId) => {
+  const token = localStorage.getItem('sureplug_admin_token');
+  try {
+    const res = await fetch(`/api/admin/reviews/${reviewId}/dismiss`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    if (res.ok) {
+      const rev = adminReviewsList.value.find(r => r.id === reviewId);
+      if (rev) {
+        rev.is_reported = 0;
+      }
+      if (selectedInspectReview.value && selectedInspectReview.value.id === reviewId) {
+        selectedInspectReview.value.is_reported = 0;
+      }
+    } else {
+      alert('Failed to dismiss review report.');
+    }
+  } catch (e) {
+    console.error('Error dismissing report:', e);
+  }
+};
+
+const handleDeleteReview = async (reviewId) => {
+  if (!confirm('Are you sure you want to permanently delete this review?')) return;
+  const token = localStorage.getItem('sureplug_admin_token');
+  try {
+    const res = await fetch(`/api/admin/reviews/${reviewId}`, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    if (res.ok) {
+      adminReviewsList.value = adminReviewsList.value.filter(r => r.id !== reviewId);
+      if (selectedInspectReview.value && selectedInspectReview.value.id === reviewId) {
+        isInspectModalOpen.value = false;
+        selectedInspectReview.value = null;
+      }
+    } else {
+      alert('Failed to delete review.');
+    }
+  } catch (e) {
+    console.error('Error deleting review:', e);
+  }
+};
+
+const openReviewInspectModal = (review) => {
+  selectedInspectReview.value = review;
+  isInspectModalOpen.value = true;
+};
+
+const filteredAdminReviews = computed(() => {
+  return adminReviewsList.value.filter(r => {
+    if (filterFlaggedOnly.value && !r.is_flagged) return false;
+    if (filterReportedOnly.value && !r.is_reported) return false;
+    return true;
+  });
+});
+
+const adminReviewsStats = computed(() => {
+  const total = adminReviewsList.value.length;
+  const flagged = adminReviewsList.value.filter(r => r.is_flagged).length;
+  const reported = adminReviewsList.value.filter(r => r.is_reported).length;
+  const totalRating = adminReviewsList.value.reduce((acc, r) => acc + r.rating, 0);
+  const avg = total > 0 ? (totalRating / total).toFixed(1) : '0';
+  return { totalCount: total, flaggedCount: flagged, reportedCount: reported, avgRating: avg };
+});
+
+watch(isInspectModalOpen, (newVal) => {
+  if (newVal) {
+    document.body.style.overflow = 'hidden';
+  } else {
+    document.body.style.overflow = '';
+  }
+});
 
 // Allowed Admin invite management states
 const allowedEmailsList = ref([]);
@@ -131,6 +291,7 @@ onMounted(() => {
   loadAllowedEmails();
   loadCategories();
   loadOrders();
+  loadAdminReviews();
 });
 
 // Filter states
@@ -258,6 +419,14 @@ const viewOrderDetails = (order) => {
   isOrderModalOpen.value = true;
 };
 
+watch(isOrderModalOpen, (newVal) => {
+  if (newVal) {
+    document.body.style.overflow = 'hidden';
+  } else {
+    document.body.style.overflow = '';
+  }
+});
+
 const getImageUrl = (images) => {
   if (Array.isArray(images)) return images[0] || '';
   try {
@@ -297,8 +466,7 @@ const getImageUrl = (images) => {
       </button>
       <button 
         class="dashboard-tab-btn" 
-        :class="{ active: activeTab === 'orders' }" 
-        @click="activeTab = 'orders'"
+        @click="router.push('/admin/orders')"
       >
         Customer Orders
       </button>
@@ -308,6 +476,13 @@ const getImageUrl = (images) => {
         @click="activeTab = 'allowed'"
       >
         Allowed Admins
+      </button>
+      <button 
+        class="dashboard-tab-btn" 
+        :class="{ active: activeTab === 'reviews' }" 
+        @click="activeTab = 'reviews'; loadAdminReviews();"
+      >
+        Reviews Moderation
       </button>
     </div>
 
@@ -392,8 +567,14 @@ const getImageUrl = (images) => {
                 <td>{{ prod.category }}</td>
                 <td class="price-cell">{{ formatPrice(prod.price) }}</td>
                 <td>
-                  <span v-if="prod.is_available" class="status-badge badge-active">Available</span>
-                  <span v-else class="status-badge badge-hidden">Unavailable</span>
+                  <label class="switch" @click.stop>
+                    <input 
+                      type="checkbox" 
+                      :checked="prod.is_available" 
+                      @change="toggleAvailability(prod)"
+                    />
+                    <span class="slider round"></span>
+                  </label>
                 </td>
                 <td class="actions-cell">
                   <button class="btn-action edit" @click="handleEdit(prod.id)" aria-label="Edit product">Edit</button>
@@ -458,6 +639,127 @@ const getImageUrl = (images) => {
                       aria-label="Revoke authorization"
                     >
                       Revoke
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Reviews Moderation Panel Tab Content -->
+    <template v-else-if="activeTab === 'reviews'">
+      <div class="reviews-panel-admin animate-fade-in">
+        <!-- Metrics Stats Cards Grid -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-icon active-icon flex items-center justify-center font-bold">★</div>
+            <div class="metric-info">
+              <span class="metric-val">{{ adminReviewsStats.avgRating }}</span>
+              <span class="metric-label">Average Store Rating</span>
+            </div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon info-icon flex items-center justify-center font-bold">#</div>
+            <div class="metric-info">
+              <span class="metric-val">{{ adminReviewsStats.totalCount }}</span>
+              <span class="metric-label">Total Verified Reviews</span>
+            </div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-icon error-icon flex items-center justify-center font-bold">⚠️</div>
+            <div class="metric-info">
+              <span class="metric-val">{{ adminReviewsStats.reportedCount }}</span>
+              <span class="metric-label">Active Reports</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <div class="section-header-split">
+            <div>
+              <h2 class="section-title-sub">Reviews Moderation</h2>
+              <p class="section-desc-sub">Audit reviews across all products, flag inappropriate remarks, or permanently delete items.</p>
+            </div>
+            <!-- Toggle Filters -->
+            <div class="filter-toggle-container flex gap-4">
+              <label class="toggle-checkbox-label" style="margin-right: 16px;">
+                <input type="checkbox" v-model="filterFlaggedOnly" class="toggle-checkbox" />
+                <span>Flagged only</span>
+              </label>
+              <label class="toggle-checkbox-label">
+                <input type="checkbox" v-model="filterReportedOnly" class="toggle-checkbox" />
+                <span>Reported only</span>
+              </label>
+            </div>
+          </div>
+
+          <div v-if="adminReviewsLoading" class="reviews-loading-inline">
+            <span class="spinner-small"></span> Loading reviews manifest...
+          </div>
+
+          <div v-else class="table-responsive">
+            <table class="products-table">
+              <thead>
+                <tr>
+                  <th>Product Name</th>
+                  <th>Reviewer</th>
+                  <th>Rating</th>
+                  <th>Comment Preview</th>
+                  <th>Date</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="filteredAdminReviews.length === 0">
+                  <td colspan="7" class="no-records-cell">No reviews matching the moderation criteria found.</td>
+                </tr>
+                <tr 
+                  v-for="rev in filteredAdminReviews" 
+                  :key="rev.id"
+                  :class="{ 'flagged-row': rev.is_flagged, 'reported-row': rev.is_reported && !rev.is_flagged, 'clickable-order-row': true }"
+                  @click="openReviewInspectModal(rev)"
+                >
+                  <td class="font-semibold">{{ rev.product_name || `Product #${rev.product_id}` }}</td>
+                  <td>
+                    <div class="reviewer-meta-cell">
+                      <span class="font-semibold">{{ rev.reviewer_name }}</span>
+                      <span class="text-xs text-muted" v-if="rev.reviewer_university">{{ rev.reviewer_university }}</span>
+                    </div>
+                  </td>
+                  <td class="stars-gold font-semibold">{{ rev.rating }} ★</td>
+                  <td class="comment-preview-cell" :title="rev.comment">
+                    {{ rev.comment.length > 50 ? rev.comment.slice(0, 50) + '...' : rev.comment }}
+                  </td>
+                  <td>{{ new Date(rev.created_at).toLocaleDateString('en-NG', { dateStyle: 'short' }) }}</td>
+                  <td>
+                    <span v-if="rev.is_flagged" class="badge-flagged">Flagged 🚫</span>
+                    <span v-else-if="rev.is_reported" class="badge-reported">Reported ⚠️</span>
+                    <span v-else class="badge-active">Active ✓</span>
+                  </td>
+                  <td class="actions-cell" @click.stop>
+                    <button 
+                      class="btn-action toggle-flag-btn" 
+                      :class="rev.is_flagged ? 'unflag-btn' : 'flag-btn'"
+                      @click="handleToggleFlag(rev.id)"
+                    >
+                      {{ rev.is_flagged ? 'Unflag' : 'Flag' }}
+                    </button>
+                    <button 
+                      v-if="rev.is_reported"
+                      class="btn-action dismiss-report-btn"
+                      @click="handleDismissReport(rev.id)"
+                    >
+                      Dismiss
+                    </button>
+                    <button 
+                      class="btn-action delete" 
+                      @click="handleDeleteReview(rev.id)"
+                    >
+                      Delete
                     </button>
                   </td>
                 </tr>
@@ -598,6 +900,75 @@ const getImageUrl = (images) => {
         </div>
         <div class="modal-footer">
           <button class="btn btn-navy" @click="isOrderModalOpen = false">Close Details</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Review Details & Comment Inspect Modal -->
+    <div v-if="isInspectModalOpen && selectedInspectReview" class="modal-overlay" @click.self="isInspectModalOpen = false">
+      <div class="modal-card modal-card-large animate-fade-in">
+        <div class="modal-header">
+          <h3>Review Manifest: <span class="text-purple">#{{ selectedInspectReview.id }}</span></h3>
+          <button class="modal-close-btn" @click="isInspectModalOpen = false">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="modal-section-grid">
+            <div>
+              <h4 class="modal-sub-label">Reviewer Information</h4>
+              <p><strong>Name:</strong> {{ selectedInspectReview.reviewer_name }}</p>
+              <p v-if="selectedInspectReview.reviewer_university"><strong>University:</strong> {{ selectedInspectReview.reviewer_university }}</p>
+              <p><strong>Rating:</strong> <span class="stars-gold font-bold">{{ selectedInspectReview.rating }} ★</span></p>
+              <p><strong>Submitted:</strong> {{ new Date(selectedInspectReview.created_at).toLocaleString() }}</p>
+            </div>
+            <div>
+              <h4 class="modal-sub-label">Context Info</h4>
+              <p><strong>Product:</strong> {{ selectedInspectReview.product_name || `Product #${selectedInspectReview.product_id}` }}</p>
+              <p><strong>Product ID:</strong> #{{ selectedInspectReview.product_id }}</p>
+              <p><strong>Order Ref:</strong> <span class="text-mono font-semibold">{{ selectedInspectReview.order_reference }}</span></p>
+              <p><strong>Status:</strong>
+                <span v-if="selectedInspectReview.is_flagged" class="badge-flagged" style="margin-left: 6px;">Flagged 🚫</span>
+                <span v-else-if="selectedInspectReview.is_reported" class="badge-reported" style="margin-left: 6px;">Reported ⚠️</span>
+                <span v-else class="badge-active" style="margin-left: 6px;">Active ✓</span>
+              </p>
+            </div>
+          </div>
+
+          <div style="margin-top: 24px;">
+            <h4 class="modal-sub-label">Full Review Comment</h4>
+            <div style="background-color: var(--color-bg); border: 1.5px solid var(--color-border-light); padding: 18px; border-radius: 8px; font-size: 14.5px; line-height: 1.6; color: var(--color-slate-headings); white-space: pre-wrap; max-height: 200px; overflow-y: auto; text-align: left;">
+              {{ selectedInspectReview.comment }}
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer flex gap-2">
+          <!-- Flag Action -->
+          <button 
+            class="btn" 
+            :class="selectedInspectReview.is_flagged ? 'btn-outlined' : 'btn-yellow'"
+            @click="handleToggleFlag(selectedInspectReview.id)"
+          >
+            {{ selectedInspectReview.is_flagged ? 'Unflag Review' : 'Flag & Hide Review' }}
+          </button>
+
+          <!-- Dismiss Action -->
+          <button 
+            v-if="selectedInspectReview.is_reported"
+            class="btn btn-outlined" 
+            @click="handleDismissReport(selectedInspectReview.id)"
+          >
+            Dismiss Report
+          </button>
+
+          <!-- Delete Action -->
+          <button 
+            class="btn btn-navy" 
+            style="background-color: #EF4444 !important; border-color: #EF4444 !important; color: white !important;"
+            @click="handleDeleteReview(selectedInspectReview.id)"
+          >
+            Delete Permanently
+          </button>
+
+          <button class="btn btn-navy" @click="isInspectModalOpen = false">Close</button>
         </div>
       </div>
     </div>
@@ -1193,5 +1564,185 @@ const getImageUrl = (images) => {
   display: flex;
   justify-content: flex-end;
   background-color: var(--color-bg);
+}
+
+/* Toggle Switch Slider */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 22px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #CBD5E1;
+  transition: .2s;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .2s;
+}
+
+input:checked + .slider {
+  background-color: var(--color-green);
+}
+
+input:focus + .slider {
+  box-shadow: 0 0 1px var(--color-green);
+}
+
+input:checked + .slider:before {
+  transform: translateX(22px);
+}
+
+.slider.round {
+  border-radius: 22px;
+}
+
+.slider.round:before {
+  border-radius: 50%;
+}
+
+/* Reviews dashboard styles */
+.section-header-split {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+.filter-toggle-container {
+  display: flex;
+  align-items: center;
+}
+.toggle-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-slate-headings);
+  cursor: pointer;
+}
+.toggle-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.flagged-row {
+  background-color: #FFF5F5 !important;
+}
+.flagged-row:hover {
+  background-color: #FEE2E2 !important;
+}
+.reported-row {
+  background-color: #FFFDF5 !important;
+}
+.reported-row:hover {
+  background-color: #FEF3C7 !important;
+}
+.badge-flagged {
+  background-color: #FEE2E2;
+  color: #DC2626;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  display: inline-block;
+}
+.badge-reported {
+  background-color: #FEF3C7;
+  color: #D97706;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  display: inline-block;
+}
+.badge-active {
+  background-color: #ECFDF5;
+  color: #059669;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  display: inline-block;
+}
+.btn-action.dismiss-report-btn {
+  background-color: #E2E8F0;
+  color: #475569;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-right: 6px;
+}
+.btn-action.dismiss-report-btn:hover {
+  background-color: #CBD5E1;
+}
+.btn-action.toggle-flag-btn {
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-right: 6px;
+}
+.btn-action.toggle-flag-btn.flag-btn {
+  background-color: #FEF3C7;
+  color: #D97706;
+}
+.btn-action.toggle-flag-btn.flag-btn:hover {
+  background-color: #FDE68A;
+}
+.btn-action.toggle-flag-btn.unflag-btn {
+  background-color: #E2E8F0;
+  color: #475569;
+}
+.btn-action.toggle-flag-btn.unflag-btn:hover {
+  background-color: #CBD5E1;
+}
+.reviewer-meta-cell {
+  display: flex;
+  flex-direction: column;
+}
+.comment-preview-cell {
+  max-width: 250px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.reviews-loading-inline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 0;
+  color: var(--color-muted-grey);
+}
+.spinner-small {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid var(--color-border-light);
+  border-top-color: var(--color-navy);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 </style>

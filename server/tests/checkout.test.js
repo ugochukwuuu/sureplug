@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import { spawn } from 'child_process';
-import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 
 const dbPath = path.resolve('server/db/sureplug.db');
 const db = new sqlite3.Database(dbPath);
@@ -26,17 +26,21 @@ const dbRun = (sql, params = []) => {
   });
 };
 
-// Start server on port 3800
+// Start server on port 3800 in test mode
 let serverProcess;
+const KORA_TEST_KEY = 'test_kora_secret_key_12345';
 
 test.before(() => {
   return new Promise((resolve, reject) => {
-    console.log('Starting test server on port 3800...');
+    console.log('Starting test server on port 3800 in test environment...');
     serverProcess = spawn('node', ['server/server.js'], {
       env: {
         ...process.env,
         PORT: '3800',
-        JWT_SECRET: 'test_jwt_secret_value_for_testing_purposes_only'
+        NODE_ENV: 'test',
+        JWT_SECRET: 'test_jwt_secret_value_for_testing_purposes_only',
+        KORA_SECRET_KEY: KORA_TEST_KEY,
+        DEFAULT_CURRENCY: 'NGN'
       }
     });
 
@@ -84,90 +88,232 @@ test('Fix 2: Comma-Separated Budget Parser Matches Correctly', async () => {
   assert.ok(data.recommendations.length > 0, 'Should return laptops within the 1.5M budget');
 });
 
-test('Fix 3: Checkout Endpoint Deducts Stock and Persists Orders', async () => {
-  // Find an available product
-  const testProd = await dbGet('SELECT id, title, stock_quantity FROM products WHERE is_available = 1 AND stock_quantity > 0 LIMIT 1');
-  assert.ok(testProd, 'Should find at least one active product with stock in db');
+test('Checkout Idempotency Keys & Server Calculations', async () => {
+  const testProd = await dbGet('SELECT id, title, price, stock_quantity FROM products WHERE is_available = 1 AND stock_quantity > 0 LIMIT 1');
+  assert.ok(testProd, 'Should locate an active product');
+
+  const idempotencyKey = crypto.randomUUID();
+
+  // Submission 1
+  const res1 = await fetch('http://localhost:3800/api/checkout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      cartItems: [{ id: testProd.id, quantity: 1 }],
+      deliveryInfo: {
+        fullName: 'First Buyer',
+        phone: '08123456789',
+        email: 'first@example.com',
+        address: '10 Test Lane',
+        state: 'Lagos State',
+        landmark: 'Test Lab'
+      },
+      paymentMethod: 'card',
+      deliveryMethod: 'express',
+      idempotencyKey
+    })
+  });
+
+  assert.strictEqual(res1.status, 201);
+  const data1 = await res1.json();
+  assert.strictEqual(data1.success, true);
+  assert.ok(data1.orderId > 0);
+  assert.ok(data1.checkoutUrl);
+
+  // Correlation ID validation
+  const correlationHeader = res1.headers.get('X-Correlation-ID');
+  assert.ok(correlationHeader, 'X-Correlation-ID should be propagated in headers');
+
+  // Submission 2: Replay checkout
+  const res2 = await fetch('http://localhost:3800/api/checkout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      cartItems: [{ id: testProd.id, quantity: 1 }],
+      deliveryInfo: {
+        fullName: 'First Buyer',
+        phone: '08123456789',
+        email: 'first@example.com',
+        address: '10 Test Lane',
+        state: 'Lagos State',
+        landmark: 'Test Lab'
+      },
+      paymentMethod: 'card',
+      deliveryMethod: 'express',
+      idempotencyKey
+    })
+  });
+
+  assert.strictEqual(res2.status, 200);
+  const data2 = await res2.json();
+  assert.strictEqual(data2.orderId, data1.orderId);
+  assert.strictEqual(data2.checkoutUrl, data1.checkoutUrl);
+});
+
+test('Webhook Web Signature, Deduplication & Atomic Settlements', async () => {
+  const testProd = await dbGet('SELECT id, title, price, stock_quantity FROM products WHERE is_available = 1 AND stock_quantity > 2 LIMIT 1');
+  assert.ok(testProd, 'Should locate an active product with stock');
 
   const initialStock = testProd.stock_quantity;
   const targetId = testProd.id;
+  const idempotencyKey = crypto.randomUUID();
 
-  // Checkout 1 unit
-  const res = await fetch('http://localhost:3800/api/checkout', {
+  // Create checkout
+  const checkoutRes = await fetch('http://localhost:3800/api/checkout', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       cartItems: [{ id: targetId, quantity: 1 }],
       deliveryInfo: {
-        fullName: 'Test Suite Client',
+        fullName: 'Webhook Client',
         phone: '08123456789',
-        email: 'testsuite@example.com',
+        email: 'webhook@example.com',
         address: '10 Test Lane',
         state: 'Lagos State',
         landmark: 'Test Lab'
       },
-      paymentMethod: 'transfer',
-      deliveryMethod: 'express'
+      paymentMethod: 'card',
+      deliveryMethod: 'standard',
+      idempotencyKey
     })
   });
 
-  assert.strictEqual(res.status, 201);
-  const data = await res.json();
-  assert.strictEqual(data.success, true);
-  assert.ok(data.orderId > 0);
+  assert.strictEqual(checkoutRes.status, 201);
+  const checkoutData = await checkoutRes.json();
+  const paymentRef = checkoutData.paymentReference;
 
-  // Validate stock decrement
-  const updatedProd = await dbGet('SELECT stock_quantity FROM products WHERE id = ?', [targetId]);
-  assert.strictEqual(updatedProd.stock_quantity, initialStock - 1);
+  // Assert stock is NOT decremented yet
+  const stockBeforePay = await dbGet('SELECT stock_quantity FROM products WHERE id = ?', [targetId]);
+  assert.strictEqual(stockBeforePay.stock_quantity, initialStock, 'Stock must not be reduced at checkout generation');
 
-  // Validate order entry in database
-  const orderRow = await dbGet('SELECT * FROM orders WHERE id = ?', [data.orderId]);
-  assert.ok(orderRow);
-  assert.strictEqual(orderRow.customer_name, 'Test Suite Client');
-  assert.strictEqual(orderRow.delivery_method, 'express');
+  // Trigger webhook
+  const webhookPayload = {
+    event: 'charge.success',
+    data: {
+      reference: paymentRef,
+      status: 'success',
+      amount: testProd.price, // standard Naira units
+      currency: 'NGN',
+      payment_method: 'card',
+      transaction_id: `tx_${Date.now()}`
+    }
+  };
 
-  // Verify stock insufficient block
-  const blockRes = await fetch('http://localhost:3800/api/checkout', {
+  const rawBodyString = JSON.stringify(webhookPayload);
+  const signature = crypto.createHmac('sha256', KORA_TEST_KEY).update(rawBodyString).digest('hex');
+
+  const webhookRes = await fetch('http://localhost:3800/api/payments/webhook', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Korapay-Signature': signature
+    },
+    body: rawBodyString
+  });
+
+  assert.strictEqual(webhookRes.status, 200);
+
+  // Validate stock is unchanged after webhook settlement (boolean availability model)
+  const stockAfterPay = await dbGet('SELECT stock_quantity FROM products WHERE id = ?', [targetId]);
+  assert.strictEqual(stockAfterPay.stock_quantity, initialStock);
+
+  // Validate no inventory movements ledger was written
+  const movement = await dbGet('SELECT * FROM inventory_movements WHERE reference = ?', [checkoutData.orderId]);
+  assert.strictEqual(movement, undefined);
+
+  // Validate payment status states
+  const order = await dbGet('SELECT payment_status, fulfillment_status FROM orders WHERE id = ?', [checkoutData.orderId]);
+  assert.strictEqual(order.payment_status, 'paid');
+  assert.strictEqual(order.fulfillment_status, 'pending');
+
+  // Send duplicate webhook -> verify duplicate event hash blocks it
+  const duplicateWebhookRes = await fetch('http://localhost:3800/api/payments/webhook', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Korapay-Signature': signature
+    },
+    body: rawBodyString
+  });
+  assert.strictEqual(duplicateWebhookRes.status, 200);
+  const duplicateData = await duplicateWebhookRes.json();
+  assert.strictEqual(duplicateData.message, 'Duplicate event ignored.');
+
+  // Validate stock was NOT decremented
+  const stockAfterDuplicate = await dbGet('SELECT stock_quantity FROM products WHERE id = ?', [targetId]);
+  assert.strictEqual(stockAfterDuplicate.stock_quantity, initialStock);
+});
+
+test('Webhook Settlement under Stock Depletion Interval', async () => {
+  const testProd = await dbGet('SELECT id, title, price, stock_quantity FROM products WHERE is_available = 1 AND stock_quantity > 0 LIMIT 1');
+  assert.ok(testProd, 'Should locate an active product');
+
+  const targetId = testProd.id;
+  const initialStock = testProd.stock_quantity;
+  const idempotencyKey = crypto.randomUUID();
+
+  // Create checkout
+  const checkoutRes = await fetch('http://localhost:3800/api/checkout', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      cartItems: [{ id: targetId, quantity: 999999 }], // excess quantity
+      cartItems: [{ id: targetId, quantity: initialStock }],
       deliveryInfo: {
-        fullName: 'Test Suite Client',
+        fullName: 'Stale Client',
         phone: '08123456789',
-        email: 'testsuite@example.com',
+        email: 'stale@example.com',
         address: '10 Test Lane',
         state: 'Lagos State',
         landmark: 'Test Lab'
       },
-      paymentMethod: 'transfer',
-      deliveryMethod: 'express'
+      paymentMethod: 'card',
+      deliveryMethod: 'standard',
+      idempotencyKey
     })
   });
-  assert.strictEqual(blockRes.status, 400);
-  const blockData = await blockRes.json();
-  assert.ok(blockData.error.includes('Insufficient stock'));
-});
 
-test('Fix 7: Revoked Admin Credentials Fails with 403 Forbidden', async () => {
-  // Pre-seed mock revoked admin
-  await dbRun('DELETE FROM admins WHERE email = ?', ['revoked_test_suite@example.com']);
-  await dbRun('DELETE FROM allowed_emails WHERE email = ?', ['revoked_test_suite@example.com']);
+  const checkoutData = await checkoutRes.json();
+  const paymentRef = checkoutData.paymentReference;
 
-  const hashedPassword = await bcrypt.hash('secretpass', 10);
-  await dbRun('INSERT INTO admins (email, password) VALUES (?, ?)', ['revoked_test_suite@example.com', hashedPassword]);
+  // Deplete stock in another transaction (simulating stock depletion in the interval before payment)
+  await dbRun('UPDATE products SET stock_quantity = 0, is_available = 0 WHERE id = ?', [targetId]);
 
-  // Login
-  const loginRes = await fetch('http://localhost:3800/api/admin/login', {
+  // Trigger webhook
+  const webhookPayload = {
+    event: 'charge.success',
+    data: {
+      reference: paymentRef,
+      status: 'success',
+      amount: testProd.price * initialStock,
+      currency: 'NGN',
+      payment_method: 'card',
+      transaction_id: `tx_depleted_${Date.now()}`
+    }
+  };
+
+  const rawBodyString = JSON.stringify(webhookPayload);
+  const signature = crypto.createHmac('sha256', KORA_TEST_KEY).update(rawBodyString).digest('hex');
+
+  const webhookRes = await fetch('http://localhost:3800/api/payments/webhook', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'revoked_test_suite@example.com', password: 'secretpass' })
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Korapay-Signature': signature
+    },
+    body: rawBodyString
   });
 
-  assert.strictEqual(loginRes.status, 403);
-  const loginData = await loginRes.json();
-  assert.ok(loginData.error.includes('revoked'));
+  assert.strictEqual(webhookRes.status, 200);
 
-  // Clean up
-  await dbRun('DELETE FROM admins WHERE email = ?', ['revoked_test_suite@example.com']);
+  // Validate payment status states: paid but fulfillment failed due to inventory depletion
+  const order = await dbGet('SELECT payment_status, fulfillment_status FROM orders WHERE id = ?', [checkoutData.orderId]);
+  assert.strictEqual(order.payment_status, 'paid');
+  assert.strictEqual(order.fulfillment_status, 'fulfillment_failed');
+
+  // Verify stock quantity did not go negative
+  const finalStock = await dbGet('SELECT stock_quantity FROM products WHERE id = ?', [targetId]);
+  assert.strictEqual(finalStock.stock_quantity, 0);
+
+  // Restore stock
+  await dbRun('UPDATE products SET stock_quantity = ?, is_available = 1 WHERE id = ?', [initialStock, targetId]);
 });

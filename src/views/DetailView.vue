@@ -25,6 +25,80 @@ const verdictBullets = ref([]);
 const verdictHandler = ref('');
 const isVerdictLoading = ref(true);
 
+const reviewsData = ref({
+  reviews: [],
+  totalReviewCount: 0,
+  averageRating: 0
+});
+const isReviewsLoading = ref(false);
+const reportedReviews = ref(new Set());
+
+const loadReviews = async () => {
+  const id = Number(route.params.id);
+  isReviewsLoading.value = true;
+  try {
+    const res = await fetch(`/api/products/${id}/reviews`);
+    if (res.ok) {
+      reviewsData.value = await res.json();
+    }
+  } catch (e) {
+    console.error('Error fetching product reviews:', e);
+  } finally {
+    isReviewsLoading.value = false;
+  }
+};
+
+const formatRelativeDate = (dateStr) => {
+  if (!dateStr) return '';
+  const now = new Date();
+  const past = new Date(dateStr);
+  const diffMs = now - past;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 30) return `${diffDays} days ago`;
+
+  return past.toLocaleDateString('en-NG', { dateStyle: 'medium' });
+};
+
+const reportReview = async (reviewId) => {
+  try {
+    const res = await fetch(`/api/reviews/${reviewId}/report`, {
+      method: 'POST'
+    });
+    if (res.ok) {
+      reportedReviews.value.add(reviewId);
+    } else {
+      alert('Failed to report review.');
+    }
+  } catch (e) {
+    console.error('Error reporting review:', e);
+  }
+};
+
+const ratingDistribution = computed(() => {
+  const counts = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+  if (reviewsData.value && Array.isArray(reviewsData.value.reviews)) {
+    reviewsData.value.reviews.forEach(r => {
+      if (counts[r.rating] !== undefined) {
+        counts[r.rating]++;
+      }
+    });
+  }
+
+  const total = reviewsData.value.totalReviewCount || 1;
+  const pct = {};
+  for (let s = 1; s <= 5; s++) {
+    pct[s] = Math.round((counts[s] / total) * 100);
+  }
+  return pct;
+});
+
 const fetchVerdict = async (prod) => {
   if (!prod) return;
   isVerdictLoading.value = true;
@@ -123,10 +197,12 @@ const fetchAllProducts = async () => {
 onMounted(() => {
   loadProduct();
   fetchAllProducts();
+  loadReviews();
 });
 
 watch(() => route.params.id, () => {
   loadProduct();
+  loadReviews();
 });
 
 // Related products matches
@@ -253,15 +329,20 @@ const formatPrice = (val) => {
         
         <!-- Ratings header -->
         <div class="product-ratings-summary">
-          <div class="stars-gold">
-            <span v-for="star in 5" :key="star" class="star">★</span>
+          <div class="stars-gold-custom">
+            <span v-for="star in 5" :key="star" class="star-item" :style="{ color: star <= Math.round(reviewsData.averageRating) ? '#FFB800' : '#CBD5E1' }">★</span>
           </div>
-          <span class="rating-num">4.8</span>
-          <span class="reviews-count-text">(124 reviews)</span>
+          <span class="rating-num">{{ reviewsData.averageRating }}</span>
+          <span class="reviews-count-text">({{ reviewsData.totalReviewCount }} reviews)</span>
         </div>
 
         <!-- Price -->
         <div class="product-price-highlight">{{ formatPrice(product.price) }}</div>
+
+        <!-- Unavailability Notice -->
+        <div v-if="product.is_available === false" class="unavailability-notice animate-fade-in">
+          ⚠️ This product is currently sold out and unavailable.
+        </div>
 
         <p class="product-description-text">{{ product.description }}</p>
 
@@ -277,7 +358,12 @@ const formatPrice = (val) => {
           </div>
 
           <div class="action-buttons-row">
-            <button class="btn btn-navy cart-submit-btn" @click="handleAddToCart">
+            <button 
+              class="btn btn-navy cart-submit-btn" 
+              :class="{ 'btn-disabled': product.is_available === false }"
+              :disabled="product.is_available === false"
+              @click="handleAddToCart"
+            >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="9" cy="21" r="1"></circle>
                 <circle cx="20" cy="21" r="1"></circle>
@@ -285,7 +371,12 @@ const formatPrice = (val) => {
               </svg>
               Add to Cart
             </button>
-            <button class="btn btn-yellow buy-now-btn" @click="handleBuyNow">
+            <button 
+              class="btn btn-yellow buy-now-btn" 
+              :class="{ 'btn-disabled': product.is_available === false }"
+              :disabled="product.is_available === false"
+              @click="handleBuyNow"
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
               Buy Now
             </button>
@@ -349,62 +440,69 @@ const formatPrice = (val) => {
         <div class="reviews-split-grid">
           <!-- Left metrics -->
           <div class="reviews-aggregate-box">
-            <div class="agg-num">4.8</div>
+            <div class="agg-num">{{ reviewsData.averageRating }}</div>
             <p class="agg-lbl">out of 5</p>
-            <div class="stars-gold inline-stars">★★★★★</div>
-            <span class="agg-count-text">124 reviews</span>
+            <div class="stars-gold-custom inline-stars">
+              <span v-for="star in 5" :key="star" :style="{ color: star <= Math.round(reviewsData.averageRating) ? '#FFB800' : '#CBD5E1' }">★</span>
+            </div>
+            <span class="agg-count-text">{{ reviewsData.totalReviewCount }} reviews</span>
 
             <!-- Rating bars list -->
             <div class="rating-bar-chart">
-              <div class="rating-row">
-                <span class="star-lbl">5★</span>
-                <div class="progress-bar-bg"><div class="progress-fill" style="width: 91%"></div></div>
-                <span class="percent-val">91%</span>
-              </div>
-              <div class="rating-row">
-                <span class="star-lbl">4★</span>
-                <div class="progress-bar-bg"><div class="progress-fill" style="width: 7%"></div></div>
-                <span class="percent-val">7%</span>
-              </div>
-              <div class="rating-row">
-                <span class="star-lbl">3★</span>
-                <div class="progress-bar-bg"><div class="progress-fill" style="style: width: 1%"></div></div>
-                <span class="percent-val">1%</span>
-              </div>
-              <div class="rating-row">
-                <span class="star-lbl">2★</span>
-                <div class="progress-bar-bg"><div class="progress-fill" style="style: width: 0.5%"></div></div>
-                <span class="percent-val">0.5%</span>
-              </div>
-              <div class="rating-row">
-                <span class="star-lbl">1★</span>
-                <div class="progress-bar-bg"><div class="progress-fill" style="style: width: 0.5%"></div></div>
-                <span class="percent-val">0.5%</span>
+              <div class="rating-row" v-for="star in [5, 4, 3, 2, 1]" :key="star">
+                <span class="star-lbl">{{ star }}★</span>
+                <div class="progress-bar-bg">
+                  <div class="progress-fill" :style="{ width: `${ratingDistribution[star]}%` }"></div>
+                </div>
+                <span class="percent-val">{{ ratingDistribution[star] }}%</span>
               </div>
             </div>
           </div>
 
           <!-- Right reviews list -->
           <div class="reviews-comments-list">
+            <!-- Loading Indicator -->
+            <div v-if="isReviewsLoading" class="reviews-loading-inline">
+              <span class="spinner-small"></span> Loading reviews...
+            </div>
+
+            <!-- Empty State -->
+            <div v-else-if="reviewsData.reviews.length === 0" class="reviews-empty-state">
+              <p class="empty-title">No reviews yet. Be the first to share your experience.</p>
+              <p class="empty-note">Only verified buyers who purchased this device can submit reviews.</p>
+            </div>
+
             <!-- Review items -->
-            <div v-for="rev in (product.reviews && product.reviews.length > 0 ? product.reviews : mockProducts[0].reviews)" :key="rev.id" class="review-comment-card">
+            <div v-else v-for="rev in reviewsData.reviews" :key="rev.id" class="review-comment-card animate-fade-in">
               <div class="reviewer-header">
-                <div class="reviewer-avatar-img">
-                  <img :src="rev.reviewer_avatar" alt="Reviewer photo" />
+                <div class="reviewer-avatar-placeholder">
+                  {{ (rev.reviewer_name || 'U').charAt(0).toUpperCase() }}
                 </div>
                 <div class="reviewer-meta">
                   <div class="reviewer-name-row">
                     <span class="reviewer-name">{{ rev.reviewer_name }}</span>
-                    <span class="blue-check">✓</span>
+                    <span class="verified-badge">✓ Verified Buyer</span>
                   </div>
-                  <span class="reviewer-school">{{ rev.reviewer_university }} · {{ rev.reviewer_year }}</span>
+                  <span class="reviewer-school" v-if="rev.reviewer_university">{{ rev.reviewer_university }}</span>
                 </div>
                 <div class="review-stars-col">
-                  <div class="stars-gold">★★★★★</div>
-                  <span class="review-date">May 12, 2025</span>
+                  <div class="star-rating-display">
+                    <span v-for="star in 5" :key="star" :style="{ color: star <= rev.rating ? '#FFB800' : '#CBD5E1' }">★</span>
+                  </div>
+                  <span class="review-date">{{ formatRelativeDate(rev.created_at) }}</span>
                 </div>
               </div>
               <p class="review-text-body">{{ rev.comment }}</p>
+
+              <!-- Report Link Row -->
+              <div class="review-actions-row">
+                <span v-if="reportedReviews.has(rev.id)" class="reported-confirmation">
+                  ✓ Thanks for reporting
+                </span>
+                <button v-else @click="reportReview(rev.id)" class="report-review-btn">
+                  Report
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1229,5 +1327,118 @@ const formatPrice = (val) => {
 
 .detail-wishlist-btn:active svg {
   transform: scale(1.3);
+}
+
+.unavailability-notice {
+  background-color: #FEF2F2;
+  border-left: 4px solid #EF4444;
+  color: #B91C1C;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 16px 0;
+  text-align: left;
+}
+
+.btn-disabled {
+  background-color: #E2E8F0 !important;
+  border-color: #E2E8F0 !important;
+  color: #94A3B8 !important;
+  cursor: not-allowed !important;
+  opacity: 0.7;
+}
+
+/* Custom review styles */
+.stars-gold-custom {
+  font-size: 18px;
+  display: flex;
+  gap: 2px;
+}
+.stars-gold-custom .star-item {
+  color: #CBD5E1;
+}
+.inline-stars {
+  justify-content: center;
+  margin-bottom: 8px;
+}
+.reviewer-avatar-placeholder {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background-color: var(--color-navy);
+  color: var(--color-white);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 15px;
+}
+.verified-badge {
+  background-color: #ECFDF5;
+  color: #059669;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  margin-left: 8px;
+}
+.review-actions-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  border-top: 1px dashed var(--color-border-light);
+  padding-top: 8px;
+}
+.report-review-btn {
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: var(--color-muted-grey);
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 0.2s ease;
+}
+.report-review-btn:hover {
+  color: #EF4444;
+}
+.reported-confirmation {
+  font-size: 12px;
+  color: #059669;
+  font-weight: 600;
+}
+.reviews-loading-inline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 0;
+  color: var(--color-muted-grey);
+  font-size: 14.5px;
+}
+.spinner-small {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid var(--color-border-light);
+  border-top-color: var(--color-navy);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.reviews-empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  background-color: var(--color-bg);
+  border-radius: 16px;
+  border: 1px dashed var(--color-border-light);
+}
+.reviews-empty-state .empty-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-slate-headings);
+  margin-bottom: 6px;
+}
+.reviews-empty-state .empty-note {
+  font-size: 13px;
+  color: var(--color-muted-grey);
 }
 </style>
