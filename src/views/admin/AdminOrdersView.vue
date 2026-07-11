@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { brand } from '@/config/brand.js';
 
 const router = useRouter();
 
@@ -50,13 +51,13 @@ const productsMap = computed(() => {
 
 const getProductImage = (itemId) => {
   const p = productsMap.value[itemId];
-  if (!p) return '/src/assets/logo.png'; // fallback placeholder
-  if (Array.isArray(p.images)) return p.images[0] || '/src/assets/logo.png';
+  if (!p) return brand.logo; // fallback placeholder
+  if (Array.isArray(p.images)) return p.images[0] || brand.logo;
   try {
     const parsed = JSON.parse(p.images || '[]');
-    return parsed[0] || '/src/assets/logo.png';
+    return parsed[0] || brand.logo;
   } catch (e) {
-    return p.images || '/src/assets/logo.png';
+    return p.images || brand.logo;
   }
 };
 
@@ -401,8 +402,15 @@ watch(isModalOpen, (newVal) => {
             </tr>
           </thead>
           <tbody>
-            <tr v-if="filteredOrders.length === 0">
-              <td colspan="8" class="no-records-cell">No checkout orders match your query criteria.</td>
+            <tr v-if="ordersList.length === 0">
+              <td colspan="9" class="no-records-cell" style="text-align: center; color: var(--color-muted); padding: 48px 24px;">
+                No orders yet. They will appear here once customers start checking out.
+              </td>
+            </tr>
+            <tr v-else-if="filteredOrders.length === 0">
+              <td colspan="9" class="no-records-cell" style="text-align: center; padding: 24px;">
+                No checkout orders match your query criteria.
+              </td>
             </tr>
             <tr 
               v-for="order in paginatedOrders" 
@@ -584,7 +592,11 @@ watch(isModalOpen, (newVal) => {
                   :disabled="isUpdatingFulfillment"
                   @click="changeFulfillmentStatus('shipped')"
                 >
-                  Shipped ✉️
+                  Shipped
+                  <svg class="status-btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: middle; margin-left: 4px;">
+                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                    <polyline points="22,6 12,13 2,6"></polyline>
+                  </svg>
                 </button>
                 <button 
                   class="btn btn-outlined status-step-btn" 
@@ -596,8 +608,13 @@ watch(isModalOpen, (newVal) => {
                 </button>
               </div>
             </div>
-            <p class="fulfillment-info-tip" v-if="selectedOrder.fulfillment_status === 'shipped'">
-              💡 Transitioning to <strong>Shipped</strong> triggers a customer dispatch email in the background.
+            <p class="fulfillment-info-tip" v-if="selectedOrder.fulfillment_status === 'shipped'" style="display: inline-flex; align-items: center; gap: 6px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-yellow); flex-shrink: 0;">
+                <path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .6 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"></path>
+                <line x1="9" y1="18" x2="15" y2="18"></line>
+                <line x1="10" y1="22" x2="14" y2="22"></line>
+              </svg>
+              <span>Transitioning to <strong>Shipped</strong> triggers a customer dispatch email in the background.</span>
             </p>
           </div>
         </div>

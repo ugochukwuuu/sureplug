@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useCartStore } from '../stores/cart';
 import { useRouter, useRoute } from 'vue-router';
+import { brand } from '@/config/brand.js';
 
 const cartStore = useCartStore();
 const router = useRouter();
@@ -355,7 +356,7 @@ const formatPrice = (val) => {
             </div>
             
             <a 
-              href="https://wa.me/PHONE_NUMBER_HERE?text=Hi%20Sureplug%2C%20I%20want%20to%20place%20an%20order.%20Here%20are%20my%20details%3A" 
+              :href="`https://wa.me/${brand.supportPhone?.replace(/\D/g, '')}?text=Hi%20${encodeURIComponent(brand.name)}%2C%20I%20want%20to%20place%20an%20order.%20Here%20are%20my%20details%3A`" 
               target="_blank" 
               rel="noopener noreferrer" 
               class="btn-whatsapp-alt"
@@ -450,7 +451,12 @@ const formatPrice = (val) => {
 
       <!-- Verification Error / Polling Timeout state -->
       <div v-else-if="verifyError" class="confirmation-card error-card">
-        <div class="error-icon-box">⏳</div>
+        <div class="error-icon-box">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </div>
         <h2 class="confirmation-title">Verification Pending</h2>
         <p class="confirmation-desc" style="color: #EF4444; font-weight: 600; margin-bottom: 24px; line-height: 1.5;">
           {{ verifyError }}
@@ -1053,7 +1059,14 @@ const formatPrice = (val) => {
 }
 
 .error-icon-box {
-  font-size: 32px;
+  width: 64px;
+  height: 64px;
+  background-color: #FEE2E2;
+  color: #EF4444;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-bottom: 24px;
 }
 </style>

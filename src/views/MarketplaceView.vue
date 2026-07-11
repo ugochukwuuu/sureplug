@@ -320,12 +320,9 @@ const selectCategory = (catName) => {
           </div>
 
           <div v-if="filteredProducts.length === 0" class="empty-results-state">
-            <div class="empty-icon-box">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-            </div>
-            <h3>No products found</h3>
-            <p>Try clearing some filters or searching for something else.</p>
-            <button class="btn btn-navy" @click="clearAllFilters">Clear All Filters</button>
+            <h2 class="empty-headline">No results found.</h2>
+            <p class="empty-subtext">Try adjusting your filters or search for something else.</p>
+            <button class="btn btn-yellow" @click="clearAllFilters">Clear Filters</button>
           </div>
 
           <div v-else class="marketplace-sections-container animate-fade-in" :key="filteredProducts.length">
@@ -655,36 +652,29 @@ const selectCategory = (catName) => {
 
 .empty-results-state {
   text-align: center;
-  padding: 60px 24px;
+  padding: 80px 24px;
   background-color: var(--color-white);
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   border: 1px solid var(--color-border-light);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
 }
 
-.empty-icon-box {
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  background-color: var(--color-bg);
+.empty-headline {
+  font-family: var(--font-display), serif;
+  font-size: 2.25rem;
+  color: var(--color-navy);
+  margin: 0;
+}
+
+.empty-subtext {
+  font-family: var(--font-body), sans-serif;
+  font-size: 1rem;
   color: var(--color-muted-grey);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.empty-results-state h3 {
-  font-size: 20px;
-  font-weight: 700;
-}
-
-.empty-results-state p {
-  font-size: 14px;
-  color: var(--color-muted-grey);
-  margin-bottom: 8px;
+  max-width: 400px;
+  margin: 0 0 8px 0;
 }
 
 /* Pagination UI */

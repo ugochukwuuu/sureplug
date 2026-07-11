@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
+import { brand } from '@/config/brand.js';
 import { mockProducts } from '../../mockProducts';
 
 const router = useRouter();
@@ -599,7 +600,7 @@ const getImageUrl = (images) => {
               <input 
                 v-model="newAllowedEmail" 
                 type="email" 
-                placeholder="e.g. admin.assistant@sureplug.com" 
+                :placeholder="`e.g. admin.assistant@${brand.name.toLowerCase()}.com`" 
                 class="form-input allowed-email-input" 
                 required
               />
@@ -655,21 +656,35 @@ const getImageUrl = (images) => {
         <!-- Metrics Stats Cards Grid -->
         <div class="metrics-grid">
           <div class="metric-card">
-            <div class="metric-icon active-icon flex items-center justify-center font-bold">★</div>
+            <div class="metric-icon active-icon flex items-center justify-center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+              </svg>
+            </div>
             <div class="metric-info">
               <span class="metric-val">{{ adminReviewsStats.avgRating }}</span>
               <span class="metric-label">Average Store Rating</span>
             </div>
           </div>
           <div class="metric-card">
-            <div class="metric-icon info-icon flex items-center justify-center font-bold">#</div>
+            <div class="metric-icon info-icon flex items-center justify-center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </div>
             <div class="metric-info">
               <span class="metric-val">{{ adminReviewsStats.totalCount }}</span>
               <span class="metric-label">Total Verified Reviews</span>
             </div>
           </div>
           <div class="metric-card">
-            <div class="metric-icon error-icon flex items-center justify-center font-bold">⚠️</div>
+            <div class="metric-icon error-icon flex items-center justify-center">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+            </div>
             <div class="metric-info">
               <span class="metric-val">{{ adminReviewsStats.reportedCount }}</span>
               <span class="metric-label">Active Reports</span>
@@ -714,8 +729,15 @@ const getImageUrl = (images) => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-if="filteredAdminReviews.length === 0">
-                  <td colspan="7" class="no-records-cell">No reviews matching the moderation criteria found.</td>
+                <tr v-if="adminReviewsList.length === 0">
+                  <td colspan="7" class="no-records-cell" style="text-align: center; color: var(--color-muted); padding: 48px 24px;">
+                    No reviews submitted yet.
+                  </td>
+                </tr>
+                <tr v-else-if="filteredAdminReviews.length === 0">
+                  <td colspan="7" class="no-records-cell" style="text-align: center; padding: 24px;">
+                    No reviews matching the moderation criteria found.
+                  </td>
                 </tr>
                 <tr 
                   v-for="rev in filteredAdminReviews" 
@@ -736,9 +758,27 @@ const getImageUrl = (images) => {
                   </td>
                   <td>{{ new Date(rev.created_at).toLocaleDateString('en-NG', { dateStyle: 'short' }) }}</td>
                   <td>
-                    <span v-if="rev.is_flagged" class="badge-flagged">Flagged 🚫</span>
-                    <span v-else-if="rev.is_reported" class="badge-reported">Reported ⚠️</span>
-                    <span v-else class="badge-active">Active ✓</span>
+                    <span v-if="rev.is_flagged" class="badge-flagged">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+                      </svg>
+                      <span>Flagged</span>
+                    </span>
+                    <span v-else-if="rev.is_reported" class="badge-reported">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                        <line x1="12" y1="9" x2="12" y2="13"></line>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                      </svg>
+                      <span>Reported</span>
+                    </span>
+                    <span v-else class="badge-active">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                      </svg>
+                      <span>Active</span>
+                    </span>
                   </td>
                   <td class="actions-cell" @click.stop>
                     <button 
@@ -926,9 +966,27 @@ const getImageUrl = (images) => {
               <p><strong>Product ID:</strong> #{{ selectedInspectReview.product_id }}</p>
               <p><strong>Order Ref:</strong> <span class="text-mono font-semibold">{{ selectedInspectReview.order_reference }}</span></p>
               <p><strong>Status:</strong>
-                <span v-if="selectedInspectReview.is_flagged" class="badge-flagged" style="margin-left: 6px;">Flagged 🚫</span>
-                <span v-else-if="selectedInspectReview.is_reported" class="badge-reported" style="margin-left: 6px;">Reported ⚠️</span>
-                <span v-else class="badge-active" style="margin-left: 6px;">Active ✓</span>
+                <span v-if="selectedInspectReview.is_flagged" class="badge-flagged" style="margin-left: 6px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+                  </svg>
+                  <span>Flagged</span>
+                </span>
+                <span v-else-if="selectedInspectReview.is_reported" class="badge-reported" style="margin-left: 6px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                  </svg>
+                  <span>Reported</span>
+                </span>
+                <span v-else class="badge-active" style="margin-left: 6px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                  </svg>
+                  <span>Active</span>
+                </span>
               </p>
             </div>
           </div>
@@ -1666,7 +1724,9 @@ input:checked + .slider:before {
   font-weight: 700;
   padding: 4px 10px;
   border-radius: 9999px;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .badge-reported {
   background-color: #FEF3C7;
@@ -1675,7 +1735,9 @@ input:checked + .slider:before {
   font-weight: 700;
   padding: 4px 10px;
   border-radius: 9999px;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .badge-active {
   background-color: #ECFDF5;
@@ -1684,7 +1746,9 @@ input:checked + .slider:before {
   font-weight: 700;
   padding: 4px 10px;
   border-radius: 9999px;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 .btn-action.dismiss-report-btn {
   background-color: #E2E8F0;

@@ -1,4 +1,5 @@
 import { Resend } from 'resend';
+import { brand } from '../config/brand.js';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const resend = RESEND_API_KEY && !RESEND_API_KEY.includes('your_resend_api_key_here') ? new Resend(RESEND_API_KEY) : null;
@@ -15,7 +16,7 @@ export async function sendOrderConfirmationEmail(order) {
 
   try {
     const firstName = (order.customer_name || '').split(' ')[0] || 'Customer';
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const frontendUrl = brand.websiteUrl || 'http://localhost:5173';
     const trackingUrl = `${frontendUrl}/track/${order.payment_reference}`;
     
     // Parse order items
@@ -68,10 +69,10 @@ export async function sendOrderConfirmationEmail(order) {
       </head>
       <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F8FAFC; color: #334155;">
         <div style="max-width: 600px; margin: 20px auto; background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
-          <!-- Header (Sureplug colors) -->
+          <!-- Header (Brand colors) -->
           <div style="background-color: #1E0E62; padding: 32px 24px; text-align: center;">
-            <h1 style="margin: 0; color: #FFB800; font-size: 28px; font-weight: bold;">Sureplug</h1>
-            <p style="margin: 8px 0 0 0; color: #FFFFFF; font-size: 14px; opacity: 0.9;">Authentic tech. Trusted people. Zero stress.</p>
+            <h1 style="margin: 0; color: #FFB800; font-size: 28px; font-weight: bold;">${brand.name}</h1>
+            <p style="margin: 8px 0 0 0; color: #FFFFFF; font-size: 14px; opacity: 0.9;">${brand.tagline}</p>
           </div>
 
           <!-- Body -->
@@ -151,9 +152,9 @@ export async function sendOrderConfirmationEmail(order) {
     console.log(`[Email Service] Attempting to send confirmation email to ${order.customer_email} for order #${order.id}`);
     
     const response = await resend.emails.send({
-      from: 'Sureplug <onboarding@resend.dev>',
+      from: `${brand.name} <onboarding@resend.dev>`,
       to: order.customer_email,
-      subject: 'Order Confirmed — Your Sureplug order is on its way 🎉',
+      subject: `Order Confirmed — Your ${brand.name} order is on its way 🎉`,
       html: emailHtml
     });
 
@@ -175,8 +176,35 @@ export async function sendShipmentNotificationEmail(order) {
 
   try {
     const firstName = (order.customer_name || '').split(' ')[0] || 'Customer';
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const frontendUrl = brand.websiteUrl || 'http://localhost:5173';
     const trackingUrl = `${frontendUrl}/track/${order.payment_reference}`;
+
+    // Parse order items
+    let items = [];
+    try {
+      items = JSON.parse(order.items_json);
+    } catch (e) {
+      console.error('Error parsing items JSON for shipment email:', e);
+    }
+
+    // Build summary rows with inline styling
+    let itemsRows = '';
+    let subtotal = 0;
+    for (const item of items) {
+      const itemTotal = item.price * item.quantity;
+      subtotal += itemTotal;
+      itemsRows += `
+        <tr>
+          <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; text-align: left; font-size: 14px; color: #334155;">${item.title}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 14px; color: #334155;">${item.quantity}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; text-align: right; font-size: 14px; color: #334155;">₦${Number(item.price).toLocaleString('en-NG')}</td>
+          <td style="padding: 12px; border-bottom: 1px solid #E2E8F0; text-align: right; font-size: 14px; color: #334155; font-weight: bold;">₦${Number(itemTotal).toLocaleString('en-NG')}</td>
+        </tr>
+      `;
+    }
+
+    const deliveryFee = order.delivery_method === 'express' ? 2500 : 0;
+    const finalTotal = subtotal + deliveryFee;
 
     const emailHtml = `
       <!DOCTYPE html>
@@ -190,15 +218,15 @@ export async function sendShipmentNotificationEmail(order) {
         <div style="max-width: 600px; margin: 20px auto; background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
           <!-- Header -->
           <div style="background-color: #1E0E62; padding: 32px 24px; text-align: center;">
-            <h1 style="margin: 0; color: #FFB800; font-size: 28px; font-weight: bold;">Sureplug</h1>
-            <p style="margin: 8px 0 0 0; color: #FFFFFF; font-size: 14px; opacity: 0.9;">Authentic tech. Vetted sellers. Zero stress.</p>
+            <h1 style="margin: 0; color: #FFB800; font-size: 28px; font-weight: bold;">${brand.name}</h1>
+            <p style="margin: 8px 0 0 0; color: #FFFFFF; font-size: 14px; opacity: 0.9;">${brand.tagline}</p>
           </div>
 
           <!-- Body -->
           <div style="padding: 32px 24px;">
             <h2 style="margin: 0 0 16px 0; color: #1E0E62; font-size: 20px; font-weight: bold;">Hey ${firstName},</h2>
             <p style="margin: 0 0 16px 0; font-size: 16px; line-height: 1.6; color: #334155; font-weight: bold;">
-              Your order is on its way! 🚀
+              Good news — your order has been shipped! 🚀
             </p>
             <p style="margin: 0 0 24px 0; font-size: 15px; line-height: 1.6; color: #475569;">
               We have handed your package over to our delivery partner.
@@ -207,7 +235,45 @@ export async function sendShipmentNotificationEmail(order) {
             <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 24px; font-size: 14px; line-height: 1.5;">
               <p style="margin: 0 0 8px 0;"><strong>Order Reference:</strong> <span style="font-family: monospace; font-weight: bold; color: #6366F1;">${order.payment_reference}</span></p>
               <p style="margin: 0 0 8px 0;"><strong>Delivery Method:</strong> ${order.delivery_method === 'express' ? 'Express (Same Day)' : 'Standard (1-2 Days)'}</p>
-              <p style="margin: 0;"><strong>Estimated Delivery Timeframe:</strong> ${order.delivery_method === 'express' ? 'Today' : '1-2 Days'}</p>
+              <p style="margin: 0;"><strong>Estimated Delivery Timeframe:</strong> 1-2 days</p>
+            </div>
+
+            <!-- Product Summary Table -->
+            <h3 style="margin: 0 0 12px 0; color: #1E0E62; font-size: 16px; border-bottom: 2px solid #FFB800; padding-bottom: 6px;">Product Summary</h3>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+              <thead>
+                <tr style="background-color: #EEF2FF;">
+                  <th style="padding: 12px; text-align: left; font-size: 12px; font-weight: bold; text-transform: uppercase; color: #475569;">Item</th>
+                  <th style="padding: 12px; text-align: center; font-size: 12px; font-weight: bold; text-transform: uppercase; color: #475569;">Qty</th>
+                  <th style="padding: 12px; text-align: right; font-size: 12px; font-weight: bold; text-transform: uppercase; color: #475569;">Price</th>
+                  <th style="padding: 12px; text-align: right; font-size: 12px; font-weight: bold; text-transform: uppercase; color: #475569;">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${itemsRows}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colspan="3" style="padding: 12px; text-align: right; font-size: 14px; color: #475569;">Subtotal</td>
+                  <td style="padding: 12px; text-align: right; font-size: 14px; color: #334155; font-weight: bold;">₦${Number(subtotal).toLocaleString('en-NG')}</td>
+                </tr>
+                <tr>
+                  <td colspan="3" style="padding: 12px; text-align: right; font-size: 14px; color: #475569;">Delivery (${order.delivery_method === 'express' ? 'Express' : 'Standard'})</td>
+                  <td style="padding: 12px; text-align: right; font-size: 14px; color: #334155; font-weight: bold;">₦${Number(deliveryFee).toLocaleString('en-NG')}</td>
+                </tr>
+                <tr style="background-color: #F8FAFC;">
+                  <td colspan="3" style="padding: 12px; text-align: right; font-size: 16px; font-weight: bold; color: #1E0E62;">Total</td>
+                  <td style="padding: 12px; text-align: right; font-size: 16px; font-weight: bold; color: #1E0E62; border-top: 2px solid #E2E8F0;">₦${Number(finalTotal).toLocaleString('en-NG')}</td>
+                </tr>
+              </tfoot>
+            </table>
+
+            <!-- Delivery Address Box -->
+            <h3 style="margin: 0 0 12px 0; color: #1E0E62; font-size: 16px; border-bottom: 2px solid #FFB800; padding-bottom: 6px;">Delivery Destination</h3>
+            <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 16px; margin-bottom: 32px; font-size: 14px; line-height: 1.5;">
+              <p style="margin: 0 0 8px 0;"><strong>Address:</strong> ${order.delivery_address}</p>
+              <p style="margin: 0 0 8px 0;"><strong>State:</strong> ${order.delivery_state}</p>
+              ${order.delivery_landmark ? `<p style="margin: 0 0 8px 0;"><strong>Landmark:</strong> ${order.delivery_landmark}</p>` : ''}
             </div>
 
             <!-- CTA Button -->
@@ -218,7 +284,7 @@ export async function sendShipmentNotificationEmail(order) {
             </div>
 
             <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #64748B;">
-              If you have any questions or need to make changes to your delivery, please contact our support team.
+              If you have any questions or need to make changes to your delivery, please contact our support team at <a href="mailto:${brand.supportEmail}" style="color: #6366F1; text-decoration: none;">${brand.supportEmail}</a>.
             </p>
           </div>
 
@@ -235,9 +301,9 @@ export async function sendShipmentNotificationEmail(order) {
     console.log(`[Email Service] Attempting to send shipment notification email to ${order.customer_email} for order #${order.id}`);
 
     await resend.emails.send({
-      from: 'Sureplug <onboarding@resend.dev>',
+      from: `${brand.name} <onboarding@resend.dev>`,
       to: order.customer_email,
-      subject: 'Your Sureplug order is on its way! 🚀',
+      subject: `${brand.name} — Your order is on its way!`,
       html: emailHtml
     });
   } catch (err) {

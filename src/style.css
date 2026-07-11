@@ -1,14 +1,26 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&family=Shrikhand&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Shrikhand&display=swap');
 
 :root {
-  /* Colors */
-  --color-navy: #1E0E62;
-  --color-navy-hover: #2E198F;
-  --color-yellow: #FFB800;
-  --color-yellow-hover: #E5AD00;
-  --color-purple: #6366F1;
-  --color-purple-hover: #4F46E5;
-  --color-lavender: #EEF2FF;
+  /* Dynamic visual theme custom property tokens (with defaults matching classic theme) */
+  --color-primary: #FFB800;
+  --color-secondary: #1E0E62;
+  --color-accent: #C4B5FD;
+  --color-text: #0D0B1E;
+  --color-surface: #FFFFFF;
+  --color-muted: #6B7280;
+  --font-display: 'Shrikhand', serif;
+  --font-body: 'Plus Jakarta Sans', sans-serif;
+  --radius-card: 12px;
+  --radius-button: 8px;
+
+  /* Colors derived from active theme custom properties */
+  --color-navy: var(--color-secondary);
+  --color-navy-hover: var(--color-secondary);
+  --color-yellow: var(--color-primary);
+  --color-yellow-hover: var(--color-primary);
+  --color-purple: var(--color-accent);
+  --color-purple-hover: var(--color-accent);
+  --color-lavender: var(--color-accent);
   --color-green: #16A34A;
   --color-green-bg: #E8F5E9;
   --color-orange: #EA580C;
@@ -16,16 +28,15 @@
   --color-red: #EF4444;
   --color-gold: #F59E0B;
   
-  --color-slate-headings: #0F172A;
-  --color-slate-body: #334155;
-  --color-muted-grey: #64748B;
+  --color-slate-headings: var(--color-text);
+  --color-slate-body: var(--color-text);
+  --color-muted-grey: var(--color-muted);
   --color-border-light: #E2E8F0;
   --color-bg: #F8FAFC;
-  --color-white: #FFFFFF;
+  --color-white: var(--color-surface);
 
-  /* Typography */
-  --font-display: 'Shrikhand', cursive;
-  --font-body: 'Inter', sans-serif;
+  /* Typography derived from active theme custom properties */
+  --font-headings: var(--font-display);
 }
 
 /* Reset & Base Elements */
@@ -108,7 +119,7 @@ h4 { font-size: 16px; line-height: 1.4; }
   justify-content: center;
   gap: 8px;
   padding: 12px 24px;
-  border-radius: 8px;
+  border-radius: var(--radius-button);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease-in-out;
@@ -198,7 +209,7 @@ h4 { font-size: 16px; line-height: 1.4; }
   align-items: center;
   gap: 16px;
   padding: 20px;
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   background-color: var(--color-white);
   border: 1px solid var(--color-border-light);
   cursor: pointer;
@@ -259,7 +270,7 @@ h4 { font-size: 16px; line-height: 1.4; }
 
 .badge-category {
   background-color: var(--color-lavender);
-  color: var(--color-purple);
+  color: var(--color-secondary);
 }
 
 .badge-match {
@@ -276,7 +287,7 @@ h4 { font-size: 16px; line-height: 1.4; }
 
 .product-card {
   background-color: var(--color-white);
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   border: 1px solid var(--color-border-light);
   padding: 16px;
   position: relative;
@@ -417,8 +428,60 @@ h4 { font-size: 16px; line-height: 1.4; }
 .admin-create-view h1, .admin-create-view h2, .admin-create-view h3,
 .admin-edit-view h1, .admin-edit-view h2, .admin-edit-view h3,
 .form-title {
-  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  font-family: var(--font-body) !important;
   font-weight: 800 !important;
   font-style: normal !important;
   letter-spacing: -0.02em;
+}
+
+/* Root Error Boundary styling */
+.error-boundary-wrapper {
+  background-color: var(--color-secondary);
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+}
+.error-boundary-card {
+  text-align: center;
+  max-width: 500px;
+  width: 100%;
+}
+.error-headline {
+  font-family: var(--font-display), serif;
+  font-size: 3.5rem;
+  color: var(--color-primary);
+  margin-bottom: 16px;
+  line-height: 1.2;
+}
+.error-subtext {
+  font-family: var(--font-body), sans-serif;
+  font-size: 1.125rem;
+  color: var(--color-surface);
+  margin-bottom: 32px;
+}
+.error-refresh-btn {
+  font-size: 1rem;
+  padding: 12px 28px;
+}
+
+/* Helper Utilities */
+.flex {
+  display: flex;
+}
+.items-center {
+  align-items: center;
+}
+.justify-center {
+  justify-content: center;
+}
+.gap-1 {
+  gap: 4px;
+}
+.gap-2 {
+  gap: 8px;
+}
+.gap-4 {
+  gap: 16px;
 }

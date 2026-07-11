@@ -23,6 +23,7 @@ import { authMiddleware } from './middleware/auth.js';
 import { categoriesList } from './config/categories.js';
 import { initializePayment, processWebhook, verifyPayment } from './payments/paymentService.js';
 import { sendOrderConfirmationEmail, sendShipmentNotificationEmail } from './services/email.js';
+import { brand } from './config/brand.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -106,7 +107,7 @@ initDb().then(() => {
 
 // API health endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: 'Sureplug backend active' });
+  res.json({ status: 'ok', message: `${brand.name} backend active` });
 });
 
 // Categories config endpoint
@@ -784,7 +785,7 @@ app.post('/api/ai/recommend', async (req, res) => {
         console.log('Sending request to Gemini API...');
         
         // Prepare prompt
-        const systemPrompt = `You are the Sureplug AI Recommender, a helpful assistant finding the best tech devices (laptops, phones, tablets, accessories) for university students.
+        const systemPrompt = `You are the ${brand.name} AI Recommender, a helpful assistant finding the best tech devices (laptops, phones, tablets, accessories) for university students.
 You are given a list of available products in the store's database, as well as the chat history.
 
 Your goal is to:
@@ -1670,5 +1671,5 @@ app.get(/.*/, (req, res, next) => {
 // Watched reload trigger comment
 
 app.listen(PORT, () => {
-  console.log(`Sureplug Express server running on http://localhost:${PORT}`);
+  console.log(`${brand.name} Express server running on http://localhost:${PORT}`);
 });

@@ -54,16 +54,11 @@ const favoritedItems = computed(() => {
         />
       </div>
 
-      <!-- Empty State -->
+      <!-- Empty State (Styled Empty State) -->
       <div v-else class="empty-favorites-state animate-fade-in">
-        <div class="heart-icon-box">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
-          </svg>
-        </div>
-        <h3>No saved gadgets yet</h3>
-        <p>Start hearting items in the marketplace to build your wishlist!</p>
-        <router-link to="/marketplace" class="btn btn-navy">Browse Marketplace</router-link>
+        <h2 class="empty-headline">Nothing saved yet.</h2>
+        <p class="empty-subtext">Tap the heart on any product to save it here.</p>
+        <router-link to="/marketplace" class="btn btn-yellow">Browse Marketplace</router-link>
       </div>
     </div>
   </div>
@@ -125,38 +120,30 @@ const favoritedItems = computed(() => {
   text-align: center;
   background-color: var(--color-white);
   border: 1px solid var(--color-border-light);
-  border-radius: 24px;
-  padding: 60px 40px;
+  border-radius: var(--radius-card);
+  padding: 60px 24px;
   max-width: 500px;
   margin: 40px auto 0 auto;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
-}
-
-.heart-icon-box {
-  background-color: #FFF2F2;
-  color: #FF5A5A;
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  margin: 0 auto 24px auto;
+  gap: 16px;
 }
 
-.empty-favorites-state h3 {
-  font-family: var(--font-headings);
-  font-size: 20px;
+.empty-headline {
+  font-family: var(--font-display), serif;
+  font-size: 2.25rem;
   color: var(--color-navy);
-  margin-bottom: 8px;
+  margin: 0;
 }
 
-.empty-favorites-state p {
-  font-family: var(--font-body);
-  font-size: 14px;
+.empty-subtext {
+  font-family: var(--font-body), sans-serif;
+  font-size: 1rem;
   color: var(--color-muted-grey);
-  margin-bottom: 24px;
-  line-height: 1.5;
+  max-width: 400px;
+  margin: 0;
 }
 
 @keyframes spin {

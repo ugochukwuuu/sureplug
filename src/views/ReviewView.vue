@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { brand } from '@/config/brand.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -132,7 +133,13 @@ const submitReview = async () => {
 
     <!-- Validation Error Panel -->
     <div v-else-if="validationError" class="validation-card error-card animate-fade-in">
-      <div class="error-icon">⚠️</div>
+      <div class="error-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+          <line x1="12" y1="9" x2="12" y2="13"></line>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+      </div>
       <h2 class="error-title">Verification Failed</h2>
       <p class="error-desc">{{ validationError }}</p>
       <button class="btn btn-navy" @click="router.push('/marketplace')">Return to Marketplace</button>
@@ -141,7 +148,7 @@ const submitReview = async () => {
     <!-- Success Screen (Thank You Page) -->
     <div v-else-if="isSubmitted" class="validation-card success-card animate-fade-in">
       <div class="checkmark-circle">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#FFB800" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="20 6 9 17 4 12"></polyline>
         </svg>
       </div>
@@ -194,8 +201,8 @@ const submitReview = async () => {
                 width="36" 
                 height="36" 
                 viewBox="0 0 24 24" 
-                :fill="index <= (hoverRating || rating) ? '#FFB800' : 'none'" 
-                :stroke="index <= (hoverRating || rating) ? '#FFB800' : '#CBD5E1'" 
+                :fill="index <= (hoverRating || rating) ? 'var(--color-primary)' : 'none'" 
+                :stroke="index <= (hoverRating || rating) ? 'var(--color-primary)' : '#CBD5E1'" 
                 stroke-width="2"
               >
                 <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
@@ -277,6 +284,9 @@ const submitReview = async () => {
 .error-icon {
   font-size: 48px;
   margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .error-title {
@@ -307,7 +317,7 @@ const submitReview = async () => {
 }
 
 .success-heading {
-  font-family: 'Shrikhand', cursive;
+  font-family: var(--font-display);
   font-size: 32px;
   color: var(--color-navy);
   margin-bottom: 12px;
@@ -453,7 +463,7 @@ const submitReview = async () => {
 
 /* Submit Action Button */
 .submit-action-btn {
-  background-color: #1E0E62 !important; /* Deep Indigo */
+  background-color: var(--color-secondary) !important; /* Deep Indigo */
   color: var(--color-white) !important;
   width: 100%;
   padding: 14px;

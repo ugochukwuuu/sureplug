@@ -137,7 +137,7 @@ const getImageUrl = (images) => {
   width: 100%;
   padding: 10px 16px;
   font-size: 13px;
-  border-radius: 8px;
+  border-radius: var(--radius-button);
   display: flex;
   justify-content: center;
   align-items: center;

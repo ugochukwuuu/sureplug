@@ -2,6 +2,7 @@
 import { ref, onMounted, nextTick, watch } from 'vue';
 import { useChatStore } from '../stores/chat';
 import { useRouter } from 'vue-router';
+import { brand } from '@/config/brand.js';
 
 const chatStore = useChatStore();
 const router = useRouter();
@@ -71,7 +72,7 @@ const getImageUrl = (images) => {
     <!-- Header -->
     <div class="chat-header">
       <div class="chat-header-left">
-        <img src="../assets/logo.png" alt="Sureplug Logo" class="logo-image-sub" />
+        <img :src="brand.logo" :alt="`${brand.name} Logo`" class="logo-image-sub" />
         <div class="chat-header-divider"></div>
         <span class="chat-header-label">AI Recommender</span>
       </div>
@@ -86,7 +87,16 @@ const getImageUrl = (images) => {
         <div v-for="msg in chatStore.messages" :key="msg.id" class="message-bubble-wrapper" :class="msg.sender">
           <!-- Avatar Icon -->
           <div class="message-avatar">
-            <div v-if="msg.sender === 'ai'" class="ai-avatar-icon">🤖</div>
+            <div v-if="msg.sender === 'ai'" class="ai-avatar-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 8V4H8"></path>
+                <rect width="16" height="12" x="4" y="8" rx="2"></rect>
+                <path d="M2 14h2"></path>
+                <path d="M20 14h2"></path>
+                <path d="M15 13v2"></path>
+                <path d="M9 13v2"></path>
+              </svg>
+            </div>
             <div v-else class="user-avatar-icon">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
             </div>
@@ -128,7 +138,16 @@ const getImageUrl = (images) => {
         <!-- Typing Indicator -->
         <div v-if="chatStore.isTyping" class="message-bubble-wrapper ai typing">
           <div class="message-avatar">
-            <div class="ai-avatar-icon">🤖</div>
+            <div class="ai-avatar-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 8V4H8"></path>
+                <rect width="16" height="12" x="4" y="8" rx="2"></rect>
+                <path d="M2 14h2"></path>
+                <path d="M20 14h2"></path>
+                <path d="M15 13v2"></path>
+                <path d="M9 13v2"></path>
+              </svg>
+            </div>
           </div>
           <div class="message-body">
             <div class="message-text-bubble typing-bubble">
@@ -265,7 +284,7 @@ const getImageUrl = (images) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  padding: 6px;
 }
 
 .user-avatar-icon {

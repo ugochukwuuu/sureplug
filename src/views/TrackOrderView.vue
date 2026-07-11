@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { brand } from '@/config/brand.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -92,8 +93,8 @@ const getPaymentBadgeClass = (status) => {
     <!-- Header -->
     <header class="tracking-header">
       <div class="tracking-header-content">
-        <h1 class="logo-text">Sureplug</h1>
-        <p class="tagline">Authentic tech. Trusted people. Zero stress.</p>
+        <h1 class="logo-text">{{ brand.name }}</h1>
+        <p class="tagline">{{ brand.tagline }}</p>
       </div>
     </header>
 
@@ -103,12 +104,16 @@ const getPaymentBadgeClass = (status) => {
       <p>Locating order status details...</p>
     </div>
 
-    <!-- Error state -->
-    <div v-else-if="errorMsg" class="error-container card animate-fade-in">
-      <div class="error-icon">🔍</div>
-      <h2>Order Not Found</h2>
-      <p class="error-text">{{ errorMsg }}</p>
-      <button class="btn btn-yellow" @click="router.push('/')">Go to Marketplace</button>
+    <!-- Error state (Styled Empty State) -->
+    <div v-else-if="errorMsg" class="empty-state animate-fade-in">
+      <h2 class="empty-headline">Order not found.</h2>
+      <p class="empty-subtext">Double-check your order reference or contact us on WhatsApp.</p>
+      <a :href="`https://wa.me/${brand.supportPhone?.replace(/\D/g, '')}`" target="_blank" class="btn btn-yellow whatsapp-btn">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+          <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.73-1.455L0 24zm6.59-4.846c1.6.95 3.188 1.449 4.825 1.451 5.436 0 9.86-4.37 9.864-9.799.002-2.63-1.023-5.101-2.885-6.963C16.59 1.98 14.117.953 11.487.953c-5.412 0-9.819 4.364-9.824 9.795-.002 1.8.487 3.562 1.418 5.12L2.094 21.8l6.082-1.586c-1.513.918-1.513.918-.04 1.564zM17.65 14.6c-.3-.15-1.774-.874-2.048-.974-.274-.1-.474-.15-.674.15-.2.3-.774.974-.948 1.174-.174.2-.35.225-.65.075-.3-.15-1.263-.465-2.407-1.485-.89-.795-1.49-1.777-1.664-2.077-.174-.3-.018-.463.13-.61.134-.133.3-.349.45-.524.15-.175.2-.3.3-.5s.05-.375-.025-.525C9.9 8.8 9.3 7.348 9.05 6.748c-.244-.588-.492-.507-.674-.516-.174-.008-.374-.01-.574-.01-.2 0-.525.075-.8.375-.274.3-1.048 1.024-1.048 2.5s1.074 2.9 1.224 3.1c.15.2 2.11 3.22 5.116 4.52 1.63.708 2.22.775 3.018.66.788-.115 1.774-.725 2.024-1.399.25-.675.25-1.25.174-1.399-.074-.15-.274-.225-.574-.375z"/>
+        </svg>
+        <span>Contact on WhatsApp</span>
+      </a>
     </div>
 
     <!-- Main Content -->
@@ -167,7 +172,7 @@ const getPaymentBadgeClass = (status) => {
           
           <div class="items-list">
             <div v-for="item in order.items" :key="item.id" class="tracking-item-row">
-              <img :src="item.image || '/src/assets/logo.png'" alt="product image" class="item-img" />
+              <img :src="item.image || brand.logo" alt="product image" class="item-img" />
               <div class="item-details">
                 <h4 class="item-title">{{ item.title }}</h4>
                 <div class="item-meta">
@@ -577,5 +582,41 @@ const getPaymentBadgeClass = (status) => {
 
 .capitalize {
   text-transform: capitalize;
+}
+
+/* Empty state styling */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 60px 24px;
+  background-color: var(--color-white);
+  border-radius: var(--radius-card);
+  border: 1px solid var(--color-border-light);
+  max-width: 600px;
+  margin: 40px auto;
+}
+.empty-headline {
+  font-family: var(--font-display), serif;
+  font-size: 2.25rem;
+  color: var(--color-navy);
+  margin-bottom: 12px;
+}
+.empty-subtext {
+  font-family: var(--font-body), sans-serif;
+  font-size: 1rem;
+  color: var(--color-muted-grey);
+  margin-bottom: 24px;
+  max-width: 450px;
+}
+.whatsapp-btn {
+  font-size: 15px;
+  padding: 12px 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
 }
 </style>

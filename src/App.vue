@@ -1,8 +1,10 @@
 <script setup>
-import { computed } from 'vue';
+import { ref, computed, onMounted, onErrorCaptured } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Navbar from './components/Navbar.vue';
 import Footer from './components/Footer.vue';
+import { brand } from '@/config/brand.js';
+import { themes } from '@/config/themes.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -16,10 +18,44 @@ const handleLogout = () => {
   localStorage.removeItem('sureplug_admin_authenticated');
   router.push('/admin/login');
 };
+
+// Theme loader
+onMounted(() => {
+  const theme = themes[brand.theme] || themes['classic'];
+  Object.entries(theme).forEach(([key, value]) => {
+    document.documentElement.style.setProperty(key, value);
+  });
+});
+
+// General Error Boundary
+const hasError = ref(false);
+const errorDetails = ref(null);
+
+onErrorCaptured((err, instance, info) => {
+  console.error('[Root Error Boundary Captured]:', err, info);
+  hasError.value = true;
+  errorDetails.value = err;
+  return false; // Stop propagation
+});
+
+const handleRefresh = () => {
+  window.location.reload();
+};
 </script>
 
 <template>
-  <div class="app-container">
+  <!-- Runtime Fallback UI (Error Boundary) -->
+  <div v-if="hasError" class="error-boundary-wrapper page-wrapper">
+    <div class="error-boundary-card animate-fade-in">
+      <h1 class="error-headline">Something went wrong.</h1>
+      <p class="error-subtext">We've noted the issue and are working on it.</p>
+      <button @click="handleRefresh" class="btn btn-yellow error-refresh-btn">
+        Refresh Page
+      </button>
+    </div>
+  </div>
+
+  <div v-else class="app-container">
     <!-- Standard Header -->
     <Navbar v-if="!isCheckout && !isAdmin" />
 
@@ -27,8 +63,8 @@ const handleLogout = () => {
     <header v-else-if="isCheckout" class="checkout-header">
       <div class="checkout-header-content">
         <router-link to="/" class="checkout-logo">
-          <img src="./assets/logo.png" alt="Sureplug Logo" class="logo-image" />
-          <span class="logo-text">Sureplug</span>
+          <img :src="brand.logo" :alt="`${brand.name} Logo`" class="logo-image" />
+          <span class="logo-text">{{ brand.name }}</span>
         </router-link>
         <div class="checkout-secure-title">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="lock-icon"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
@@ -41,8 +77,8 @@ const handleLogout = () => {
     <header v-else class="admin-header">
       <div class="admin-header-content">
         <router-link to="/" class="admin-logo">
-          <img src="./assets/logo.png" alt="Sureplug Logo" class="logo-image" />
-          <span class="logo-text">Sureplug</span>
+          <img :src="brand.logo" :alt="`${brand.name} Logo`" class="logo-image" />
+          <span class="logo-text">{{ brand.name }}</span>
           <span class="admin-logo-tag">Admin</span>
         </router-link>
         <nav v-if="showAdminNav" class="admin-nav-links">
@@ -64,7 +100,7 @@ const handleLogout = () => {
     
     <footer v-else-if="isCheckout" class="checkout-footer">
       <div class="checkout-footer-content">
-        <router-link to="/" class="checkout-footer-logo">Sureplug</router-link>
+        <router-link to="/" class="checkout-footer-logo">{{ brand.name }}</router-link>
         <div class="checkout-footer-links">
           <a href="#">Privacy Policy</a>
           <span>·</span>
@@ -72,7 +108,7 @@ const handleLogout = () => {
           <span>·</span>
           <a href="#">Help Center</a>
         </div>
-        <p class="checkout-footer-copy">© 2025 Sureplug. All rights reserved.</p>
+        <p class="checkout-footer-copy">© 2025 {{ brand.name }}. All rights reserved.</p>
       </div>
     </footer>
   </div>

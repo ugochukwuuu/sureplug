@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { brand } from '@/config/brand.js';
 import { mockProducts } from '../mockProducts';
 import ProductCard from '../components/ProductCard.vue';
 
@@ -102,7 +103,7 @@ const selectTag = (tag) => {
               <span class="circle-badge-main">AUTHENTIC</span>
               <span class="circle-badge-sub">GUARANTEED</span>
             </div>
-            <img src="../references/HeroProductsMockup.png" alt="Sureplug Hero Devices Mockup" class="hero-mockup-img" />
+            <img :src="brand.heroMockup" :alt="`${brand.name} Hero Devices Mockup`" class="hero-mockup-img" />
           </div>
         </div>
       </div>
@@ -195,7 +196,7 @@ const selectTag = (tag) => {
           </router-link>
         </div>
         <div class="banner-graphic-block">
-          <img src="../references/Final_AI_Recommendation_Mockup.png" alt="Sureplug AI Recommendation" class="banner-mockup-img" />
+          <img :src="brand.recommendationMockup" :alt="`${brand.name} AI Recommendation`" class="banner-mockup-img" />
         </div>
       </div>
     </section>
@@ -364,6 +365,7 @@ const selectTag = (tag) => {
 
 .tags-list {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -648,6 +650,9 @@ const selectTag = (tag) => {
   .hero-tags-row {
     justify-content: center;
     flex-wrap: wrap;
+  }
+  .tags-list {
+    justify-content: center;
   }
   .hero-image-block {
     display: none;

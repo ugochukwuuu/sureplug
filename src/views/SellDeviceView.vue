@@ -1,3 +1,7 @@
+<script setup>
+import { brand } from '@/config/brand.js';
+</script>
+
 <template>
   <div class="sell-device-container">
     <div class="sell-device-content">
@@ -11,7 +15,7 @@
 
       <!-- WhatsApp CTA Button -->
       <a 
-        href="https://wa.me/2348012345678?text=Hi%20Sureplug%2C%20I%20have%20a%20device%20I%20want%20to%20sell." 
+        :href="`https://wa.me/${brand.supportPhone?.replace(/\D/g, '')}?text=Hi%20${encodeURIComponent(brand.name)}%2C%20I%20have%20a%20device%20I%20want%20to%20sell.`" 
         target="_blank" 
         rel="noopener noreferrer" 
         class="whatsapp-cta"

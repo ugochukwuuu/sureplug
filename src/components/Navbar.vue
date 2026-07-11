@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import { useCartStore } from '../stores/cart';
 import { useFavoritesStore } from '../stores/favorites';
 import { useRouter } from 'vue-router';
+import { brand } from '@/config/brand.js';
 
 const cartStore = useCartStore();
 const favoritesStore = useFavoritesStore();
@@ -15,8 +16,8 @@ const isMenuOpen = ref(false);
     <div class="navbar-content">
       <!-- Logo -->
       <router-link to="/" class="navbar-logo">
-        <img src="../assets/logo.png" alt="Sureplug Logo" class="logo-image" />
-        <span class="logo-text">Sureplug</span>
+        <img :src="brand.logo" :alt="`${brand.name} Logo`" class="logo-image" />
+        <span class="logo-text">{{ brand.name }}</span>
       </router-link>
 
       <!-- Nav Links (Desktop) -->

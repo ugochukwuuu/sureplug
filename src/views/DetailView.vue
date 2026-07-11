@@ -330,7 +330,7 @@ const formatPrice = (val) => {
         <!-- Ratings header -->
         <div class="product-ratings-summary">
           <div class="stars-gold-custom">
-            <span v-for="star in 5" :key="star" class="star-item" :style="{ color: star <= Math.round(reviewsData.averageRating) ? '#FFB800' : '#CBD5E1' }">★</span>
+            <span v-for="star in 5" :key="star" class="star-item" :style="{ color: star <= Math.round(reviewsData.averageRating) ? 'var(--color-primary)' : '#CBD5E1' }">★</span>
           </div>
           <span class="rating-num">{{ reviewsData.averageRating }}</span>
           <span class="reviews-count-text">({{ reviewsData.totalReviewCount }} reviews)</span>
@@ -341,7 +341,12 @@ const formatPrice = (val) => {
 
         <!-- Unavailability Notice -->
         <div v-if="product.is_available === false" class="unavailability-notice animate-fade-in">
-          ⚠️ This product is currently sold out and unavailable.
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+            <line x1="12" y1="9" x2="12" y2="13"></line>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+          <span>This product is currently sold out and unavailable.</span>
         </div>
 
         <p class="product-description-text">{{ product.description }}</p>
@@ -443,7 +448,7 @@ const formatPrice = (val) => {
             <div class="agg-num">{{ reviewsData.averageRating }}</div>
             <p class="agg-lbl">out of 5</p>
             <div class="stars-gold-custom inline-stars">
-              <span v-for="star in 5" :key="star" :style="{ color: star <= Math.round(reviewsData.averageRating) ? '#FFB800' : '#CBD5E1' }">★</span>
+              <span v-for="star in 5" :key="star" :style="{ color: star <= Math.round(reviewsData.averageRating) ? 'var(--color-primary)' : '#CBD5E1' }">★</span>
             </div>
             <span class="agg-count-text">{{ reviewsData.totalReviewCount }} reviews</span>
 
@@ -468,8 +473,8 @@ const formatPrice = (val) => {
 
             <!-- Empty State -->
             <div v-else-if="reviewsData.reviews.length === 0" class="reviews-empty-state">
-              <p class="empty-title">No reviews yet. Be the first to share your experience.</p>
-              <p class="empty-note">Only verified buyers who purchased this device can submit reviews.</p>
+              <p class="empty-title">No reviews yet.</p>
+              <p class="empty-note">Only verified buyers can leave a review.</p>
             </div>
 
             <!-- Review items -->
@@ -487,7 +492,7 @@ const formatPrice = (val) => {
                 </div>
                 <div class="review-stars-col">
                   <div class="star-rating-display">
-                    <span v-for="star in 5" :key="star" :style="{ color: star <= rev.rating ? '#FFB800' : '#CBD5E1' }">★</span>
+                    <span v-for="star in 5" :key="star" :style="{ color: star <= rev.rating ? 'var(--color-primary)' : '#CBD5E1' }">★</span>
                   </div>
                   <span class="review-date">{{ formatRelativeDate(rev.created_at) }}</span>
                 </div>
@@ -1283,6 +1288,35 @@ const formatPrice = (val) => {
     max-width: 250px !important;
     scroll-snap-align: start;
   }
+
+  /* Responsive Breadcrumbs wrapping */
+  .breadcrumbs {
+    flex-wrap: wrap !important;
+    gap: 6px 8px !important;
+    margin-bottom: 20px !important;
+  }
+
+  /* Responsive Review Card Header formatting */
+  .reviewer-header {
+    flex-wrap: wrap !important;
+    gap: 12px 8px !important;
+  }
+  .reviewer-name-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 4px !important;
+  }
+  .reviewer-name-row .verified-badge {
+    margin-left: 0 !important;
+  }
+  .review-stars-col {
+    text-align: left !important;
+    width: calc(100% - 54px) !important;
+    margin-left: 54px !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+  }
 }
 
 .product-title-row {
@@ -1339,6 +1373,9 @@ const formatPrice = (val) => {
   font-weight: 600;
   margin: 16px 0;
   text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .btn-disabled {
@@ -1428,16 +1465,18 @@ const formatPrice = (val) => {
   text-align: center;
   padding: 48px 24px;
   background-color: var(--color-bg);
-  border-radius: 16px;
+  border-radius: var(--radius-card);
   border: 1px dashed var(--color-border-light);
 }
 .reviews-empty-state .empty-title {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--color-slate-headings);
+  font-family: var(--font-display), serif;
+  font-size: 1.5rem;
+  font-weight: normal;
+  color: var(--color-navy);
   margin-bottom: 6px;
 }
 .reviews-empty-state .empty-note {
+  font-family: var(--font-body), sans-serif;
   font-size: 13px;
   color: var(--color-muted-grey);
 }
