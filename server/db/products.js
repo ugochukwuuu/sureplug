@@ -1,16 +1,27 @@
 import { dbAll, dbGet, dbRun } from './db.js';
 
+// Helper to safely parse JSON or return parsed object if database driver already parsed JSONB
+const parseJsonField = (field, fallback) => {
+  if (field === null || field === undefined) return fallback;
+  if (typeof field === 'object') return field;
+  try {
+    return JSON.parse(field);
+  } catch {
+    return fallback;
+  }
+};
+
 // Helper to parse DB row to JS Object format
 export const parseProductRow = (row) => {
   if (!row) return null;
   const parsed = {
     ...row,
-    is_available: row.is_available !== 0,
-    images: JSON.parse(row.images || '[]'),
-    useCases: JSON.parse(row.useCases || '[]'),
-    strengths: JSON.parse(row.strengths || '[]'),
-    ratings: JSON.parse(row.ratings || '{}'),
-    reviews: JSON.parse(row.reviews || '[]')
+    is_available: !!row.is_available,
+    images: parseJsonField(row.images, []),
+    useCases: parseJsonField(row.useCases, []),
+    strengths: parseJsonField(row.strengths, []),
+    ratings: parseJsonField(row.ratings, {}),
+    reviews: parseJsonField(row.reviews, [])
   };
   delete parsed.stock_quantity;
   return parsed;
@@ -30,7 +41,7 @@ export const getProductById = async (id) => {
     SELECT p.*, b.name AS brand 
     FROM products p 
     LEFT JOIN brands b ON p.brand_id = b.id 
-    WHERE p.id = ?
+    WHERE p.id = $1
   `, [id]);
   return parseProductRow(row);
 };
@@ -44,7 +55,7 @@ export const createProduct = async (prod) => {
     `INSERT INTO products (
       title, brand, brand_id, category, price, condition, stock_quantity, is_available,
       images, description, specifications, useCases, strengths, ratings, reviews
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
     [
       prod.title,
       prod.brand,
@@ -53,7 +64,7 @@ export const createProduct = async (prod) => {
       prod.price,
       prod.condition || 'New',
       prod.stock_quantity ?? 5,
-      prod.is_available ? 1 : 0,
+      prod.is_available ? true : false,
       typeof prod.images === 'string' ? prod.images : JSON.stringify(prod.images || []),
       prod.description || '',
       specString,
@@ -63,7 +74,7 @@ export const createProduct = async (prod) => {
       typeof prod.reviews === 'string' ? prod.reviews : JSON.stringify(prod.reviews || [])
     ]
   );
-  return result.id;
+  return result.rows[0].id;
 };
 
 export const updateProduct = async (id, prod) => {
@@ -73,22 +84,22 @@ export const updateProduct = async (id, prod) => {
 
   await dbRun(
     `UPDATE products SET
-      title = ?,
-      brand = ?,
-      brand_id = ?,
-      category = ?,
-      price = ?,
-      condition = ?,
-      stock_quantity = ?,
-      is_available = ?,
-      images = ?,
-      description = ?,
-      specifications = ?,
-      useCases = ?,
-      strengths = ?,
-      ratings = ?,
-      reviews = ?
-    WHERE id = ?`,
+      title = $1,
+      brand = $2,
+      brand_id = $3,
+      category = $4,
+      price = $5,
+      condition = $6,
+      stock_quantity = $7,
+      is_available = $8,
+      images = $9,
+      description = $10,
+      specifications = $11,
+      useCases = $12,
+      strengths = $13,
+      ratings = $14,
+      reviews = $15
+    WHERE id = $16`,
     [
       prod.title,
       prod.brand,
@@ -97,7 +108,7 @@ export const updateProduct = async (id, prod) => {
       prod.price,
       prod.condition || 'New',
       prod.stock_quantity ?? 5,
-      prod.is_available ? 1 : 0,
+      prod.is_available ? true : false,
       typeof prod.images === 'string' ? prod.images : JSON.stringify(prod.images || []),
       prod.description || '',
       specString,
@@ -112,6 +123,6 @@ export const updateProduct = async (id, prod) => {
 };
 
 export const deleteProduct = async (id) => {
-  await dbRun('DELETE FROM products WHERE id = ?', [id]);
+  await dbRun('DELETE FROM products WHERE id = $1', [id]);
   return true;
 };

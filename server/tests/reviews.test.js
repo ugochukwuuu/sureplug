@@ -1,30 +1,42 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import sqlite3 from 'sqlite3';
-import path from 'path';
+import pg from 'pg';
 import { spawn } from 'child_process';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 
-const dbPath = path.resolve('server/db/sureplug.db');
-const db = new sqlite3.Database(dbPath);
+const { Client } = pg;
 
-const dbGet = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL environment variable is required to run tests.');
+}
+
+const client = new Client({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
+await client.connect();
+
+const dbGet = async (sql, params = []) => {
+  let count = 0;
+  const convertedSql = sql.replace(/\?/g, () => {
+    count++;
+    return `$${count}`;
   });
+  const result = await client.query(convertedSql, params);
+  return result.rows[0] !== undefined ? result.rows[0] : undefined;
 };
 
-const dbRun = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve({ id: this.lastID, changes: this.changes });
-    });
+const dbRun = async (sql, params = []) => {
+  let count = 0;
+  const convertedSql = sql.replace(/\?/g, () => {
+    count++;
+    return `$${count}`;
   });
+  const result = await client.query(convertedSql, params);
+  const lastID = result.rows && result.rows[0] && result.rows[0].id ? result.rows[0].id : null;
+  return { id: lastID, changes: result.rowCount || 0 };
 };
 
 // Start server on port 3900 in test mode
@@ -75,12 +87,12 @@ test.before(() => {
   });
 });
 
-test.after(() => {
+test.after(async () => {
   if (serverProcess) {
     console.log('Stopping test server...');
     serverProcess.kill();
   }
-  db.close();
+  await client.end();
 });
 
 test('Verified Purchase Reviews Integration Flow', async () => {
@@ -101,14 +113,14 @@ test('Verified Purchase Reviews Integration Flow', async () => {
   // Seed Paid Order (Containing product)
   await dbRun(
     `INSERT INTO orders (customer_name, customer_phone, customer_email, delivery_address, delivery_state, delivery_method, payment_method, items_json, total_amount, payment_status, payment_reference)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     ['Test Buyer', '08012345678', 'buyer@example.com', '12 Test St', 'Lagos State', 'standard', 'card', itemsJson, testProduct.price, 'paid', refPaid]
   );
 
   // Seed Unpaid Order
   await dbRun(
     `INSERT INTO orders (customer_name, customer_phone, customer_email, delivery_address, delivery_state, delivery_method, payment_method, items_json, total_amount, payment_status, payment_reference)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
     ['Test Stale Buyer', '08012345678', 'stale@example.com', '12 Test St', 'Lagos State', 'standard', 'card', itemsJson, testProduct.price, 'pending', refUnpaid]
   );
 
@@ -199,7 +211,7 @@ test('Verified Purchase Reviews Integration Flow', async () => {
   assert.strictEqual(getData.averageRating, 5.0);
 
   // Assert that reviewer_name is auto-filled from order's customer_name and university is null
-  const reviewDb = await dbGet('SELECT * FROM reviews WHERE order_reference = ?', [refPaid]);
+  const reviewDb = await dbGet('SELECT * FROM reviews WHERE order_reference = $1', [refPaid]);
   assert.ok(reviewDb);
   assert.strictEqual(reviewDb.reviewer_name, 'Test Buyer');
   assert.strictEqual(reviewDb.reviewer_university, null);
@@ -237,7 +249,7 @@ test('Verified Purchase Reviews Integration Flow', async () => {
   const dismissData = await adminDismissRes.json();
   assert.strictEqual(dismissData.success, true);
   
-  const dbCheckReported = await dbGet('SELECT is_reported FROM reviews WHERE id = ?', [reviewDb.id]);
+  const dbCheckReported = await dbGet('SELECT CASE WHEN is_reported THEN 1 ELSE 0 END as is_reported FROM reviews WHERE id = $1', [reviewDb.id]);
   assert.strictEqual(dbCheckReported.is_reported, 0, 'Dismissing a report must clear the is_reported flag');
 
   // PUT Admin Flag review — hides it from public GET
@@ -270,9 +282,9 @@ test('Verified Purchase Reviews Integration Flow', async () => {
   assert.strictEqual(adminDeleteRes.status, 200);
 
   // Verify deletion from database
-  const finalDbCheck = await dbGet('SELECT * FROM reviews WHERE id = ?', [reviewDb.id]);
+  const finalDbCheck = await dbGet('SELECT * FROM reviews WHERE id = $1', [reviewDb.id]);
   assert.strictEqual(finalDbCheck, undefined);
 
   // Clean up order records
-  await dbRun('DELETE FROM orders WHERE id IN (?, ?)', [refPaid, refUnpaid]);
+  await dbRun('DELETE FROM orders WHERE payment_reference IN ($1, $2)', [refPaid, refUnpaid]);
 });

@@ -10,14 +10,14 @@ const seed = async () => {
     for (const prod of mockProducts) {
       if (prod.brand) {
         const cleanBrand = prod.brand.trim();
-        await dbRun('INSERT OR IGNORE INTO brands (name) VALUES (?)', [cleanBrand]);
+        await dbRun('INSERT INTO brands (name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [cleanBrand]);
       }
     }
 
     console.log('Seeding mock products...');
     for (const prod of mockProducts) {
       // Check if product already exists
-      const existing = await dbGet('SELECT id FROM products WHERE id = ?', [prod.id]);
+      const existing = await dbGet('SELECT id FROM products WHERE id = $1', [prod.id]);
       if (existing) {
         console.log(`Product ID ${prod.id} already exists. Skipping.`);
         continue;
@@ -25,7 +25,7 @@ const seed = async () => {
 
       let brandId = null;
       if (prod.brand) {
-        const brandRow = await dbGet('SELECT id FROM brands WHERE name = ?', [prod.brand.trim()]);
+        const brandRow = await dbGet('SELECT id FROM brands WHERE name = $1', [prod.brand.trim()]);
         if (brandRow) {
           brandId = brandRow.id;
         }
@@ -35,7 +35,7 @@ const seed = async () => {
         `INSERT INTO products (
           id, title, brand, brand_id, category, price, condition, stock_quantity,
           images, description, specifications, useCases, strengths, ratings, reviews
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
         [
           prod.id,
           prod.title,

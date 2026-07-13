@@ -27,8 +27,8 @@ export async function initializePayment({ orderId, paymentReference, amountKobo,
   // Save the reference and checkout link to the order
   await dbRun(
     `UPDATE orders 
-     SET payment_reference = ?, checkout_url = ?, provider_name = ? 
-     WHERE id = ?`,
+     SET payment_reference = $1, checkout_url = $2, provider_name = $3 
+     WHERE id = $4`,
     [ref, checkoutUrl, process.env.PAYMENT_PROVIDER || 'kora', orderId]
   );
 
@@ -79,7 +79,7 @@ export async function processWebhook({ headers, rawBody, correlationId }) {
   try {
     await dbRun(
       `INSERT INTO payment_events (payment_reference, event_hash, event_type, provider_status, headers, payload) 
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6)`,
       [
         reference,
         eventHash,
@@ -90,7 +90,7 @@ export async function processWebhook({ headers, rawBody, correlationId }) {
       ]
     );
   } catch (err) {
-    if (err.message && err.message.includes('UNIQUE constraint failed')) {
+    if (err.message && (err.message.includes('UNIQUE constraint failed') || err.code === '23505' || err.message.includes('duplicate key value'))) {
       console.log(`[TraceID: ${correlationId}] Duplicate webhook event hash detected. Ignoring duplicate execution.`);
       return { success: true, status: 200, message: 'Duplicate event ignored.' };
     }
@@ -122,7 +122,7 @@ export async function verifyPayment({ reference, correlationId }) {
   // Log verification event and update duration metric
   await dbRun(
     `INSERT INTO payment_events (payment_reference, event_hash, event_type, provider_status, headers, payload, verification_duration_ms)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [
       reference,
       crypto.randomUUID(), // unique check bypass
@@ -138,12 +138,12 @@ export async function verifyPayment({ reference, correlationId }) {
     return { success: false, status: 400, error: verificationRes.message };
   }
 
-  // BEGIN IMMEDIATE TRANSACTION for write-lock safety
-  await dbRun('BEGIN IMMEDIATE');
+  // BEGIN TRANSACTION
+  await dbRun('BEGIN');
 
   try {
     // 1. Retrieve current order record
-    const order = await dbGet('SELECT * FROM orders WHERE payment_reference = ?', [reference]);
+    const order = await dbGet('SELECT * FROM orders WHERE payment_reference = $1', [reference]);
     if (!order) {
       console.error(`[TraceID: ${correlationId}] Order not found for reference: ${reference}`);
       await dbRun('ROLLBACK');
@@ -162,8 +162,8 @@ export async function verifyPayment({ reference, correlationId }) {
       console.warn(`[TraceID: ${correlationId}] Transaction verified but status is: ${verificationRes.status}`);
       await dbRun(
         `UPDATE orders 
-         SET payment_status = ?, provider_transaction_id = ?, provider_payment_method = ?, provider_response_code = ?
-         WHERE id = ?`,
+         SET payment_status = $1, provider_transaction_id = $2, provider_payment_method = $3, provider_response_code = $4
+         WHERE id = $5`,
         [verificationRes.status, verificationRes.transactionId, verificationRes.paymentMethod, verificationRes.responseCode, order.id]
       );
       await dbRun('COMMIT');
@@ -172,25 +172,25 @@ export async function verifyPayment({ reference, correlationId }) {
 
     if (verificationRes.currency !== DEFAULT_CURRENCY) {
       console.error(`[TraceID: ${correlationId}] Currency mismatch! Expected: ${DEFAULT_CURRENCY}, Paid: ${verificationRes.currency}`);
-      await dbRun(`UPDATE orders SET payment_status = 'failed' WHERE id = ?`, [order.id]);
+      await dbRun(`UPDATE orders SET payment_status = 'failed' WHERE id = $1`, [order.id]);
       await dbRun('COMMIT');
       return { success: false, status: 400, error: 'Transaction currency mismatch.' };
     }
 
     if (Number(verificationRes.amountKobo) !== Number(order.total_amount_kobo)) {
       console.error(`[TraceID: ${correlationId}] Amount mismatch! Expected: ${order.total_amount_kobo} kobo, Paid: ${verificationRes.amountKobo} kobo`);
-      await dbRun(`UPDATE orders SET payment_status = 'failed' WHERE id = ?`, [order.id]);
+      await dbRun(`UPDATE orders SET payment_status = 'failed' WHERE id = $1`, [order.id]);
       await dbRun('COMMIT');
       return { success: false, status: 400, error: 'Transaction payable amount mismatch.' };
     }
 
     // 4. Availability check
-    const cartItems = JSON.parse(order.items_json);
+    const cartItems = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : order.items_json;
     let isAllAvailable = true;
 
     for (const item of cartItems) {
-      const prod = await dbGet('SELECT title, is_available FROM products WHERE id = ?', [item.id]);
-      if (!prod || prod.is_available === 0) {
+      const prod = await dbGet('SELECT title, is_available FROM products WHERE id = $1', [item.id]);
+      if (!prod || prod.is_available === false) {
         isAllAvailable = false;
         console.warn(`[TraceID: ${correlationId}] Product availability check failed for "${prod?.title || item.title}" during settlement.`);
         break;
@@ -201,8 +201,8 @@ export async function verifyPayment({ reference, correlationId }) {
       // Mark paid and unfulfilled -> pending
       await dbRun(
         `UPDATE orders 
-         SET payment_status = 'paid', fulfillment_status = 'pending', provider_transaction_id = ?, provider_payment_method = ?, provider_paid_at = ?, provider_response_code = ?
-         WHERE id = ?`,
+         SET payment_status = 'paid', fulfillment_status = 'pending', provider_transaction_id = $1, provider_payment_method = $2, provider_paid_at = $3, provider_response_code = $4
+         WHERE id = $5`,
         [verificationRes.transactionId, verificationRes.paymentMethod, verificationRes.paidAt, verificationRes.responseCode, order.id]
       );
       
@@ -211,8 +211,8 @@ export async function verifyPayment({ reference, correlationId }) {
       // Settle as payment received, but logistical fulfillment failed due to unavailability
       await dbRun(
         `UPDATE orders 
-         SET payment_status = 'paid', fulfillment_status = 'fulfillment_failed', provider_transaction_id = ?, provider_payment_method = ?, provider_paid_at = ?, provider_response_code = ?
-         WHERE id = ?`,
+         SET payment_status = 'paid', fulfillment_status = 'fulfillment_failed', provider_transaction_id = $1, provider_payment_method = $2, provider_paid_at = $3, provider_response_code = $4
+         WHERE id = $5`,
         [verificationRes.transactionId, verificationRes.paymentMethod, verificationRes.paidAt, verificationRes.responseCode, order.id]
       );
       
@@ -221,8 +221,8 @@ export async function verifyPayment({ reference, correlationId }) {
 
     await dbRun('COMMIT');
 
-    // Trigger order confirmation email in background (swallow failures so it doesn't block response)
-    dbGet('SELECT * FROM orders WHERE id = ?', [order.id]).then(updatedOrder => {
+    // Trigger order confirmation email in background
+    dbGet('SELECT * FROM orders WHERE id = $1', [order.id]).then(updatedOrder => {
       if (updatedOrder) {
         sendOrderConfirmationEmail(updatedOrder).catch(err => {
           console.error('[Payment Service] Failed to send order confirmation email:', err);

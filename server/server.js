@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { initDb, dbGet, dbAll, dbRun } from './db/db.js';
+import { initDb, dbGet, dbAll, dbRun, cls } from './db/db.js';
 import {
   getAllProducts,
   getProductById,
@@ -43,6 +43,23 @@ app.use((req, res, next) => {
   req.correlationId = correlationId;
   res.setHeader('X-Correlation-ID', correlationId);
   next();
+});
+
+// CLS transaction middleware
+app.use((req, res, next) => {
+  const store = new Map();
+  cls.run(store, () => {
+    res.on('finish', () => {
+      const client = store.get('client');
+      if (client) {
+        console.warn(`[TraceID: ${req.correlationId}] Connection leak detected, rolling back transaction`);
+        client.query('ROLLBACK').catch(() => {}).finally(() => {
+          client.release();
+        });
+      }
+    });
+    next();
+  });
 });
 
 // Simple NAT-friendly in-memory rate limiter
@@ -83,10 +100,10 @@ const seedSuperAdmins = async () => {
     const allowedEmails = rawEmails.split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
     
     for (const email of allowedEmails) {
-      const existing = await dbGet('SELECT id FROM allowed_emails WHERE email = ?', [email]);
+      const existing = await dbGet('SELECT id FROM allowed_emails WHERE email = $1', [email]);
       if (!existing) {
         await dbRun(
-          'INSERT INTO allowed_emails (email, added_by) VALUES (?, ?)',
+          'INSERT INTO allowed_emails (email, added_by) VALUES ($1, $2)',
           [email, 'System (Super Admin Seed)']
         );
         console.log(`Auto-seeded allowed email: ${email}`);
@@ -99,7 +116,7 @@ const seedSuperAdmins = async () => {
 
 // Initialize database tables on server startup
 initDb().then(() => {
-  console.log('SQLite database schema initialized.');
+  console.log('PostgreSQL database schema initialized.');
   seedSuperAdmins();
 }).catch(err => {
   console.error('Failed to initialize database schema:', err);
@@ -135,13 +152,13 @@ app.post('/api/brands', authMiddleware, async (req, res) => {
   
   try {
     const cleanName = name.trim();
-    const existing = await dbGet('SELECT * FROM brands WHERE name = ?', [cleanName]);
+    const existing = await dbGet('SELECT * FROM brands WHERE name = $1', [cleanName]);
     if (existing) {
       return res.status(400).json({ error: 'Brand name already exists' });
     }
     
-    const result = await dbRun('INSERT INTO brands (name) VALUES (?)', [cleanName]);
-    res.status(201).json({ id: result.id, name: cleanName });
+    const result = await dbRun('INSERT INTO brands (name) VALUES ($1) RETURNING id', [cleanName]);
+    res.status(201).json({ id: result.rows[0].id, name: cleanName });
   } catch (err) {
     console.error('Error creating brand:', err);
     res.status(500).json({ error: 'Failed to create brand' });
@@ -152,7 +169,7 @@ app.post('/api/brands', authMiddleware, async (req, res) => {
 const resolveBrandId = async (brandId, brandName) => {
   // If brandId is provided, look up the name in brands table
   if (brandId) {
-    const brandRow = await dbGet('SELECT * FROM brands WHERE id = ?', [brandId]);
+    const brandRow = await dbGet('SELECT * FROM brands WHERE id = $1', [brandId]);
     if (brandRow) {
       return { brandId, brandName: brandRow.name };
     }
@@ -161,13 +178,13 @@ const resolveBrandId = async (brandId, brandName) => {
   // If brandName is provided, check if it exists in the brands table
   if (brandName && brandName.trim()) {
     const cleanName = brandName.trim();
-    const existing = await dbGet('SELECT * FROM brands WHERE name = ?', [cleanName]);
+    const existing = await dbGet('SELECT * FROM brands WHERE name = $1', [cleanName]);
     if (existing) {
       return { brandId: existing.id, brandName: existing.name };
     } else {
       // Create new brand entry
-      const result = await dbRun('INSERT INTO brands (name) VALUES (?)', [cleanName]);
-      return { brandId: result.id, brandName: cleanName };
+      const result = await dbRun('INSERT INTO brands (name) VALUES ($1) RETURNING id', [cleanName]);
+      return { brandId: result.rows[0].id, brandName: cleanName };
     }
   }
 
@@ -199,17 +216,17 @@ app.get('/api/products', async (req, res) => {
 
     // Category filter
     if (category && category !== 'All') {
-      conditions.push('p.category = ?');
+      conditions.push(`p.category = $${params.length + 1}`);
       params.push(category);
     }
 
     // Price range filters
     if (minPrice !== undefined) {
-      conditions.push('p.price >= ?');
+      conditions.push(`p.price >= $${params.length + 1}`);
       params.push(Number(minPrice));
     }
     if (maxPrice !== undefined) {
-      conditions.push('p.price <= ?');
+      conditions.push(`p.price <= $${params.length + 1}`);
       params.push(Number(maxPrice));
     }
 
@@ -219,23 +236,34 @@ app.get('/api/products', async (req, res) => {
       if (brands.length > 0) {
         if (brands.includes('Others')) {
           const standardBrands = ['Apple', 'Samsung', 'HP', 'Lenovo', 'Dell'];
-          const placeHolders = brands.filter(b => b !== 'Others').map(() => '?').join(', ');
-          const standardPlaceHolders = standardBrands.map(() => '?').join(', ');
           
+          const otherBrands = brands.filter(b => b !== 'Others');
+          const otherPlaceholders = [];
+          otherBrands.forEach(b => {
+            params.push(b);
+            otherPlaceholders.push(`$${params.length}`);
+          });
+          
+          const standardPlaceholders = [];
+          standardBrands.forEach(sb => {
+            params.push(sb);
+            standardPlaceholders.push(`$${params.length}`);
+          });
+
           let brandSql = '';
-          if (placeHolders) {
-            brandSql = `(b.name IN (${placeHolders}) OR b.name NOT IN (${standardPlaceHolders}) OR b.name IS NULL)`;
-            brands.filter(b => b !== 'Others').forEach(b => params.push(b));
-            standardBrands.forEach(sb => params.push(sb));
+          if (otherPlaceholders.length > 0) {
+            brandSql = `(b.name IN (${otherPlaceholders.join(', ')}) OR b.name NOT IN (${standardPlaceholders.join(', ')}) OR b.name IS NULL)`;
           } else {
-            brandSql = `(b.name NOT IN (${standardPlaceHolders}) OR b.name IS NULL)`;
-            standardBrands.forEach(sb => params.push(sb));
+            brandSql = `(b.name NOT IN (${standardPlaceholders.join(', ')}) OR b.name IS NULL)`;
           }
           conditions.push(brandSql);
         } else {
-          const placeHolders = brands.map(() => '?').join(', ');
-          conditions.push(`b.name IN (${placeHolders})`);
-          brands.forEach(b => params.push(b));
+          const placeholders = [];
+          brands.forEach(b => {
+            params.push(b);
+            placeholders.push(`$${params.length}`);
+          });
+          conditions.push(`b.name IN (${placeholders.join(', ')})`);
         }
       }
     }
@@ -244,16 +272,23 @@ app.get('/api/products', async (req, res) => {
     if (condition) {
       const conditionsList = (Array.isArray(condition) ? condition : [condition]).filter(c => c && c.trim() !== '');
       if (conditionsList.length > 0) {
-        const placeHolders = conditionsList.map(() => '?').join(', ');
-        conditions.push(`p.condition IN (${placeHolders})`);
-        conditionsList.forEach(c => params.push(c));
+        const placeholders = [];
+        conditionsList.forEach(c => {
+          params.push(c);
+          placeholders.push(`$${params.length}`);
+        });
+        conditions.push(`p.condition IN (${placeholders.join(', ')})`);
       }
     }
 
     // Search query matching title, description, brand, category
     if (search && search.trim() !== '') {
       const searchTerm = `%${search.trim()}%`;
-      conditions.push('(p.title LIKE ? OR p.description LIKE ? OR b.name LIKE ? OR p.category LIKE ?)');
+      const p1 = `$${params.length + 1}`;
+      const p2 = `$${params.length + 2}`;
+      const p3 = `$${params.length + 3}`;
+      const p4 = `$${params.length + 4}`;
+      conditions.push(`(p.title LIKE ${p1} OR p.description LIKE ${p2} OR b.name LIKE ${p3} OR p.category LIKE ${p4})`);
       params.push(searchTerm, searchTerm, searchTerm, searchTerm);
     }
 
@@ -289,7 +324,9 @@ app.get('/api/products', async (req, res) => {
     const total = countResult ? countResult.count : 0;
 
     // Append pagination to select query
-    query += ' LIMIT ? OFFSET ?';
+    const pLimit = `$${params.length + 1}`;
+    const pOffset = `$${params.length + 2}`;
+    query += ` LIMIT ${pLimit} OFFSET ${pOffset}`;
     const selectParams = [...params, limitNum, offsetNum];
 
     const rows = await dbAll(query, selectParams);
@@ -329,7 +366,7 @@ app.get('/api/reviews/validate', async (req, res) => {
 
   try {
     // 1. Check if order reference exists
-    const order = await dbGet('SELECT * FROM orders WHERE payment_reference = ?', [ref]);
+    const order = await dbGet('SELECT * FROM orders WHERE payment_reference = $1', [ref]);
     if (!order) {
       return res.json({ valid: false, error: 'Invalid order reference. Order not found.' });
     }
@@ -342,7 +379,7 @@ app.get('/api/reviews/validate', async (req, res) => {
     // 3. Check if order contains the product
     let items = [];
     try {
-      items = JSON.parse(order.items_json || '[]');
+      items = typeof order.items_json === 'string' ? JSON.parse(order.items_json || '[]') : order.items_json;
     } catch (e) {
       return res.json({ valid: false, error: 'Order items payload is corrupt.' });
     }
@@ -354,7 +391,7 @@ app.get('/api/reviews/validate', async (req, res) => {
 
     // 4. Check if a review already exists
     const existingReview = await dbGet(
-      'SELECT id FROM reviews WHERE product_id = ? AND order_reference = ?',
+      'SELECT id FROM reviews WHERE product_id = $1 AND order_reference = $2',
       [productId, ref]
     );
     if (existingReview) {
@@ -376,7 +413,7 @@ app.get('/api/products/:id/reviews', async (req, res) => {
     const reviews = await dbAll(
       `SELECT id, reviewer_name, reviewer_university, rating, comment, created_at 
        FROM reviews 
-       WHERE product_id = ? AND is_flagged = 0 
+       WHERE product_id = $1 AND is_flagged = FALSE 
        ORDER BY created_at DESC`,
       [productId]
     );
@@ -384,7 +421,7 @@ app.get('/api/products/:id/reviews', async (req, res) => {
     const stats = await dbGet(
       `SELECT COUNT(*) as count, AVG(rating) as avgRating 
        FROM reviews 
-       WHERE product_id = ? AND is_flagged = 0`,
+       WHERE product_id = $1 AND is_flagged = FALSE`,
       [productId]
     );
 
@@ -419,7 +456,7 @@ app.post('/api/products/:id/reviews', async (req, res) => {
 
   try {
     // 1. Verify order reference
-    const order = await dbGet('SELECT * FROM orders WHERE payment_reference = ?', [order_reference]);
+    const order = await dbGet('SELECT * FROM orders WHERE payment_reference = $1', [order_reference]);
     if (!order) {
       return res.status(400).json({ error: 'Invalid order reference.' });
     }
@@ -432,7 +469,7 @@ app.post('/api/products/:id/reviews', async (req, res) => {
     // 3. Verify order contains product_id
     let items = [];
     try {
-      items = JSON.parse(order.items_json || '[]');
+      items = typeof order.items_json === 'string' ? JSON.parse(order.items_json || '[]') : order.items_json;
     } catch (e) {
       return res.status(500).json({ error: 'Failed to parse order items.' });
     }
@@ -444,7 +481,7 @@ app.post('/api/products/:id/reviews', async (req, res) => {
 
     // 4. Verify review doesn't exist
     const existing = await dbGet(
-      'SELECT id FROM reviews WHERE product_id = ? AND order_reference = ?',
+      'SELECT id FROM reviews WHERE product_id = $1 AND order_reference = $2',
       [productId, order_reference]
     );
     if (existing) {
@@ -457,7 +494,7 @@ app.post('/api/products/:id/reviews', async (req, res) => {
     // Save review (university option removed, inserted as NULL)
     await dbRun(
       `INSERT INTO reviews (product_id, order_reference, reviewer_name, reviewer_university, rating, comment, is_flagged)
-       VALUES (?, ?, ?, NULL, ?, ?, 0)`,
+       VALUES ($1, $2, $3, NULL, $4, $5, FALSE)`,
       [productId, order_reference, reviewer_name.trim(), ratingInt, comment.trim()]
     );
 
@@ -473,12 +510,12 @@ app.post('/api/reviews/:id/report', async (req, res) => {
   const reviewId = parseInt(req.params.id, 10);
 
   try {
-    const existing = await dbGet('SELECT id FROM reviews WHERE id = ?', [reviewId]);
+    const existing = await dbGet('SELECT id FROM reviews WHERE id = $1', [reviewId]);
     if (!existing) {
       return res.status(404).json({ error: 'Review not found.' });
     }
 
-    await dbRun('UPDATE reviews SET is_reported = 1 WHERE id = ?', [reviewId]);
+    await dbRun('UPDATE reviews SET is_reported = TRUE WHERE id = $1', [reviewId]);
     res.json({ success: true, message: 'Review reported successfully.' });
   } catch (err) {
     console.error('Error reporting review:', err);
@@ -932,12 +969,12 @@ app.post('/api/admin/login', async (req, res) => {
     const cleanEmail = email.trim().toLowerCase();
     
     // Check if email has been revoked
-    const isAllowed = await dbGet('SELECT id FROM allowed_emails WHERE email = ?', [cleanEmail]);
+    const isAllowed = await dbGet('SELECT id FROM allowed_emails WHERE email = $1', [cleanEmail]);
     if (!isAllowed) {
       return res.status(403).json({ error: 'Your admin access has been revoked. Contact the system administrator.' });
     }
 
-    const admin = await dbGet('SELECT * FROM admins WHERE email = ?', [cleanEmail]);
+    const admin = await dbGet('SELECT * FROM admins WHERE email = $1', [cleanEmail]);
     
     if (!admin) {
       return res.status(401).json({ error: 'Invalid email or password' });
@@ -971,13 +1008,13 @@ app.post('/api/admin/register', async (req, res) => {
     const cleanEmail = email.trim().toLowerCase();
     
     // 1. Check if email is in the allowed_emails registry
-    const isAllowed = await dbGet('SELECT id FROM allowed_emails WHERE email = ?', [cleanEmail]);
+    const isAllowed = await dbGet('SELECT id FROM allowed_emails WHERE email = $1', [cleanEmail]);
     if (!isAllowed) {
       return res.status(403).json({ error: 'This email is not authorized to register as an administrator.' });
     }
 
     // 2. Check if admin account already exists
-    const existing = await dbGet('SELECT id FROM admins WHERE email = ?', [cleanEmail]);
+    const existing = await dbGet('SELECT id FROM admins WHERE email = $1', [cleanEmail]);
     if (existing) {
       return res.status(400).json({ error: 'An admin account with this email already exists.' });
     }
@@ -985,7 +1022,7 @@ app.post('/api/admin/register', async (req, res) => {
     // 3. Hash password and insert
     const hashedPassword = await bcrypt.hash(password, 10);
     await dbRun(
-      'INSERT INTO admins (email, password) VALUES (?, ?)',
+      'INSERT INTO admins (email, password) VALUES ($1, $2)',
       [cleanEmail, hashedPassword]
     );
 
@@ -1018,14 +1055,14 @@ app.post('/api/admin/allowed-emails', authMiddleware, async (req, res) => {
     const cleanEmail = email.trim().toLowerCase();
     
     // Check if already allowed
-    const existing = await dbGet('SELECT id FROM allowed_emails WHERE email = ?', [cleanEmail]);
+    const existing = await dbGet('SELECT id FROM allowed_emails WHERE email = $1', [cleanEmail]);
     if (existing) {
       return res.status(400).json({ error: 'Email is already authorized.' });
     }
 
     const addedBy = req.admin ? req.admin.email : 'Admin';
     await dbRun(
-      'INSERT INTO allowed_emails (email, added_by) VALUES (?, ?)',
+      'INSERT INTO allowed_emails (email, added_by) VALUES ($1, $2)',
       [cleanEmail, addedBy]
     );
 
@@ -1053,7 +1090,7 @@ app.delete('/api/admin/allowed-emails/:email', authMiddleware, async (req, res) 
       return res.status(400).json({ error: 'Cannot remove a seeded Super Admin email address.' });
     }
 
-    await dbRun('DELETE FROM allowed_emails WHERE email = ?', [cleanEmail]);
+    await dbRun('DELETE FROM allowed_emails WHERE email = $1', [cleanEmail]);
     return res.json({ success: true });
   } catch (err) {
     console.error('Delete allowed email error:', err);
@@ -1086,7 +1123,7 @@ app.post('/api/checkout', rateLimiter(15, 60000), async (req, res) => {
   try {
     // 1. Idempotency Check: Retrieve existing order if key matches
     const existing = await dbGet(
-      'SELECT id, checkout_url, payment_reference, payment_method FROM orders WHERE idempotency_key = ?',
+      'SELECT id, checkout_url, payment_reference, payment_method FROM orders WHERE idempotency_key = $1',
       [idempotencyKey]
     );
     if (existing) {
@@ -1096,7 +1133,7 @@ app.post('/api/checkout', rateLimiter(15, 60000), async (req, res) => {
 
       if (isStaleOnlineOrder) {
         console.log(`[TraceID: ${req.correlationId}] Found stale payment session (order #${existing.id}) with null credentials. Deleting stale record to retry.`);
-        await dbRun('DELETE FROM orders WHERE id = ?', [existing.id]);
+        await dbRun('DELETE FROM orders WHERE id = $1', [existing.id]);
       } else {
         console.log(`[TraceID: ${req.correlationId}] Matching idempotency key found. Returning existing payment URL.`);
         return res.json({
@@ -1114,7 +1151,7 @@ app.post('/api/checkout', rateLimiter(15, 60000), async (req, res) => {
     const productsList = [];
 
     for (const item of cartItems) {
-      const product = await dbGet('SELECT * FROM products WHERE id = ?', [item.id]);
+      const product = await dbGet('SELECT * FROM products WHERE id = $1', [item.id]);
       if (!product) {
         return res.status(400).json({ error: `Product with ID ${item.id} not found.` });
       }
@@ -1142,7 +1179,7 @@ app.post('/api/checkout', rateLimiter(15, 60000), async (req, res) => {
     const isOnlinePayment = paymentMethod === 'card' || paymentMethod === 'transfer';
 
     if (isOnlinePayment) {
-      await dbRun('BEGIN IMMEDIATE');
+      await dbRun('BEGIN');
     }
 
     try {
@@ -1152,7 +1189,7 @@ app.post('/api/checkout', rateLimiter(15, 60000), async (req, res) => {
         `INSERT INTO orders (
           customer_name, customer_phone, customer_email, delivery_address, delivery_state, delivery_landmark,
           delivery_method, payment_method, items_json, total_amount, total_amount_kobo, payment_status, fulfillment_status, idempotency_key, payment_reference
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id`,
         [
           deliveryInfo.fullName.trim(),
           deliveryInfo.phone.trim(),
@@ -1172,13 +1209,15 @@ app.post('/api/checkout', rateLimiter(15, 60000), async (req, res) => {
         ]
       );
 
+      const orderId = result.rows[0].id;
+
       // 4. Initialize Payment gateway session if paying online (card or transfer)
       if (isOnlinePayment) {
         const frontendBase = process.env.FRONTEND_URL || 'http://localhost:5173';
         const redirectUrl = `${frontendBase}/checkout?verifying=true&reference=`;
 
         const { checkoutUrl, paymentReference: finalReference } = await initializePayment({
-          orderId: result.id,
+          orderId: orderId,
           paymentReference,
           amountKobo: finalTotalKobo,
           customer: {
@@ -1194,20 +1233,20 @@ app.post('/api/checkout', rateLimiter(15, 60000), async (req, res) => {
 
         return res.status(201).json({
           success: true,
-          orderId: result.id,
+          orderId: orderId,
           checkoutUrl,
           paymentReference: finalReference,
-          message: `Order #${result.id} initialized successfully.`
+          message: `Order #${orderId} initialized successfully.`
         });
       } else {
         // Pay on Delivery - Settle immediately inside atomic transaction
-        await dbRun('BEGIN IMMEDIATE');
+        await dbRun('BEGIN');
         try {
           let isAllAvailable = true;
 
           for (const item of productsList) {
-            const prod = await dbGet('SELECT title, is_available FROM products WHERE id = ?', [item.id]);
-            if (!prod || prod.is_available === 0) {
+            const prod = await dbGet('SELECT title, is_available FROM products WHERE id = $1', [item.id]);
+            if (!prod || prod.is_available === false) {
               isAllAvailable = false;
               break;
             }
@@ -1222,14 +1261,14 @@ app.post('/api/checkout', rateLimiter(15, 60000), async (req, res) => {
           await dbRun(
             `UPDATE orders 
              SET payment_status = 'pending', fulfillment_status = 'pending' 
-             WHERE id = ?`,
-            [result.id]
+             WHERE id = $1`,
+            [orderId]
           );
 
           await dbRun('COMMIT');
 
           // Trigger email notification for Pay on Delivery order in the background
-          dbGet('SELECT * FROM orders WHERE id = ?', [result.id]).then(updatedOrder => {
+          dbGet('SELECT * FROM orders WHERE id = $1', [orderId]).then(updatedOrder => {
             if (updatedOrder) {
               sendOrderConfirmationEmail(updatedOrder).catch(err => {
                 console.error('[Server Checkout] Failed to send COD order confirmation email:', err);
@@ -1241,9 +1280,9 @@ app.post('/api/checkout', rateLimiter(15, 60000), async (req, res) => {
 
           return res.status(201).json({
             success: true,
-            orderId: result.id,
+            orderId: orderId,
             paymentReference, // return the generated paymentReference for COD order tracking
-            message: `Order #${result.id} confirmed for Pay on Delivery.`
+            message: `Order #${orderId} confirmed for Pay on Delivery.`
           });
         } catch (err) {
           await dbRun('ROLLBACK');
@@ -1277,7 +1316,7 @@ app.get('/api/orders/track/:reference', async (req, res) => {
       `SELECT payment_reference, payment_status, fulfillment_status, customer_name, customer_phone, 
               delivery_address, delivery_state, delivery_landmark, delivery_method, items_json, created_at 
        FROM orders 
-       WHERE payment_reference = ?`,
+       WHERE payment_reference = $1`,
       [reference]
     );
 
@@ -1297,11 +1336,11 @@ app.get('/api/orders/track/:reference', async (req, res) => {
     // Load images for items
     let items = [];
     try {
-      items = JSON.parse(order.items_json);
+      items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : order.items_json;
       for (const item of items) {
-        const prod = await dbGet('SELECT images FROM products WHERE id = ?', [item.id]);
+        const prod = await dbGet('SELECT images FROM products WHERE id = $1', [item.id]);
         if (prod && prod.images) {
-          const imgs = JSON.parse(prod.images);
+          const imgs = typeof prod.images === 'string' ? JSON.parse(prod.images) : prod.images;
           item.image = imgs[0] || '';
         } else {
           item.image = '';
@@ -1343,7 +1382,7 @@ app.get('/api/checkout/status', rateLimiter(120, 60000), async (req, res) => {
 
   try {
     let order = await dbGet(
-      'SELECT id, payment_status, fulfillment_status FROM orders WHERE payment_reference = ?',
+      'SELECT id, payment_status, fulfillment_status FROM orders WHERE payment_reference = $1',
       [reference]
     );
     if (!order) {
@@ -1357,7 +1396,7 @@ app.get('/api/checkout/status', rateLimiter(120, 60000), async (req, res) => {
       if (verifyResult.success) {
         // Re-read updated order state
         order = await dbGet(
-          'SELECT id, payment_status, fulfillment_status FROM orders WHERE payment_reference = ?',
+          'SELECT id, payment_status, fulfillment_status FROM orders WHERE payment_reference = $1',
           [reference]
         );
       }
@@ -1422,15 +1461,15 @@ app.put('/api/admin/orders/:id/status', authMiddleware, async (req, res) => {
   }
 
   try {
-    const existing = await dbGet('SELECT id FROM orders WHERE id = ?', [orderId]);
+    const existing = await dbGet('SELECT id FROM orders WHERE id = $1', [orderId]);
     if (!existing) {
       return res.status(404).json({ error: 'Order not found.' });
     }
 
     await dbRun(
       `UPDATE orders 
-       SET status = ?, fulfillment_status = ? 
-       WHERE id = ?`,
+       SET status = $1, fulfillment_status = $2 
+       WHERE id = $3`,
       [status.toLowerCase(), status.toLowerCase(), orderId]
     );
     res.json({ success: true, message: `Order status updated to '${status.toLowerCase()}' successfully.` });
@@ -1443,8 +1482,8 @@ app.put('/api/admin/orders/:id/status', authMiddleware, async (req, res) => {
 // GET order statistics (Admin Protected)
 app.get('/api/admin/orders/stats', authMiddleware, async (req, res) => {
   try {
-    const ordersTodayRow = await dbGet("SELECT COUNT(*) as count FROM orders WHERE date(created_at) = date('now')");
-    const revenueTodayRow = await dbGet("SELECT SUM(total_amount) as total FROM orders WHERE payment_status = 'paid' AND date(created_at) = date('now')");
+    const ordersTodayRow = await dbGet("SELECT COUNT(*) as count FROM orders WHERE DATE(created_at) = CURRENT_DATE");
+    const revenueTodayRow = await dbGet("SELECT SUM(total_amount) as total FROM orders WHERE payment_status = 'paid' AND DATE(created_at) = CURRENT_DATE");
     const pendingFulfillmentsRow = await dbGet("SELECT COUNT(*) as count FROM orders WHERE fulfillment_status = 'pending'");
     const deliveredAllTimeRow = await dbGet("SELECT COUNT(*) as count FROM orders WHERE fulfillment_status = 'delivered'");
 
@@ -1475,20 +1514,20 @@ app.put('/api/admin/orders/:id/fulfillment', authMiddleware, async (req, res) =>
   }
 
   try {
-    const order = await dbGet('SELECT * FROM orders WHERE id = ?', [orderId]);
+    const order = await dbGet('SELECT * FROM orders WHERE id = $1', [orderId]);
     if (!order) {
       return res.status(404).json({ error: 'Order not found.' });
     }
 
     await dbRun(
       `UPDATE orders 
-       SET fulfillment_status = ?, status = ? 
-       WHERE id = ?`,
+       SET fulfillment_status = $1, status = $2 
+       WHERE id = $3`,
       [status.toLowerCase(), status.toLowerCase(), orderId]
     );
 
     if (status.toLowerCase() === 'shipped') {
-      const updatedOrder = await dbGet('SELECT * FROM orders WHERE id = ?', [orderId]);
+      const updatedOrder = await dbGet('SELECT * FROM orders WHERE id = $1', [orderId]);
       sendShipmentNotificationEmail(updatedOrder).catch(err => {
         console.error('[Server Fulfillment] Failed to send shipment notification email:', err);
       });
@@ -1511,7 +1550,7 @@ app.post('/api/admin/reconcile', authMiddleware, async (req, res) => {
       `SELECT id, payment_reference 
        FROM orders 
        WHERE payment_status = 'pending' 
-         AND created_at >= datetime('now', '-24 hours')
+         AND created_at >= NOW() - INTERVAL '24 hours'
        ORDER BY id ASC 
        LIMIT 100`
     );
@@ -1544,7 +1583,7 @@ app.get('/api/admin/reviews', authMiddleware, async (req, res) => {
   try {
     const reviews = await dbAll(
       `SELECT r.id, r.product_id, r.order_reference, r.reviewer_name, r.reviewer_university, 
-              r.rating, r.comment, r.is_flagged, r.is_reported, r.created_at, p.title as product_name
+              r.rating, r.comment, CASE WHEN r.is_flagged THEN 1 ELSE 0 END as is_flagged, CASE WHEN r.is_reported THEN 1 ELSE 0 END as is_reported, r.created_at, p.title as product_name
        FROM reviews r
        LEFT JOIN products p ON r.product_id = p.id
        ORDER BY r.created_at DESC`
@@ -1561,13 +1600,13 @@ app.put('/api/admin/reviews/:id/flag', authMiddleware, async (req, res) => {
   const reviewId = parseInt(req.params.id, 10);
 
   try {
-    const existing = await dbGet('SELECT is_flagged FROM reviews WHERE id = ?', [reviewId]);
+    const existing = await dbGet('SELECT CASE WHEN is_flagged THEN 1 ELSE 0 END as is_flagged FROM reviews WHERE id = $1', [reviewId]);
     if (!existing) {
       return res.status(404).json({ error: 'Review not found.' });
     }
 
     const newFlag = existing.is_flagged ? 0 : 1;
-    await dbRun('UPDATE reviews SET is_flagged = ? WHERE id = ?', [newFlag, reviewId]);
+    await dbRun('UPDATE reviews SET is_flagged = $1 WHERE id = $2', [newFlag === 1, reviewId]);
 
     res.json({ success: true, is_flagged: newFlag, message: `Review flagged status updated to ${newFlag}.` });
   } catch (err) {
@@ -1581,12 +1620,12 @@ app.put('/api/admin/reviews/:id/dismiss', authMiddleware, async (req, res) => {
   const reviewId = parseInt(req.params.id, 10);
 
   try {
-    const existing = await dbGet('SELECT id FROM reviews WHERE id = ?', [reviewId]);
+    const existing = await dbGet('SELECT id FROM reviews WHERE id = $1', [reviewId]);
     if (!existing) {
       return res.status(404).json({ error: 'Review not found.' });
     }
 
-    await dbRun('UPDATE reviews SET is_reported = 0 WHERE id = ?', [reviewId]);
+    await dbRun('UPDATE reviews SET is_reported = FALSE WHERE id = $1', [reviewId]);
     res.json({ success: true, message: 'Review reported status dismissed.' });
   } catch (err) {
     console.error('Error dismissing review report:', err);
@@ -1599,12 +1638,12 @@ app.delete('/api/admin/reviews/:id', authMiddleware, async (req, res) => {
   const reviewId = parseInt(req.params.id, 10);
 
   try {
-    const existing = await dbGet('SELECT id FROM reviews WHERE id = ?', [reviewId]);
+    const existing = await dbGet('SELECT id FROM reviews WHERE id = $1', [reviewId]);
     if (!existing) {
       return res.status(404).json({ error: 'Review not found.' });
     }
 
-    await dbRun('DELETE FROM reviews WHERE id = ?', [reviewId]);
+    await dbRun('DELETE FROM reviews WHERE id = $1', [reviewId]);
     res.json({ success: true, message: 'Review permanently deleted.' });
   } catch (err) {
     console.error('Error deleting review:', err);
@@ -1617,31 +1656,39 @@ const runHourlyReconciliation = async () => {
   const correlationId = `reconcile_${Date.now()}`;
   console.log(`[TraceID: ${correlationId}] Starting hourly paginated reconciliation job.`);
   
-  try {
-    const unsettledOrders = await dbAll(
-      `SELECT id, payment_reference 
-       FROM orders 
-       WHERE payment_status = 'pending' 
-         AND created_at >= datetime('now', '-24 hours')
-       ORDER BY id ASC 
-       LIMIT 50`
-    );
+  const store = new Map();
+  cls.run(store, async () => {
+    try {
+      const unsettledOrders = await dbAll(
+        `SELECT id, payment_reference 
+         FROM orders 
+         WHERE payment_status = 'pending' 
+           AND created_at >= NOW() - INTERVAL '24 hours'
+         ORDER BY id ASC 
+         LIMIT 50`
+      );
 
-    console.log(`[TraceID: ${correlationId}] Found ${unsettledOrders.length} pending orders to reconcile.`);
-    
-    for (const order of unsettledOrders) {
-      if (order.payment_reference) {
-        await verifyPayment({
-          reference: order.payment_reference,
-          correlationId
-        }).catch(err => {
-          console.error(`[TraceID: ${correlationId}] Error reconciling Order #${order.id}:`, err);
-        });
+      console.log(`[TraceID: ${correlationId}] Found ${unsettledOrders.length} pending orders to reconcile.`);
+      
+      for (const order of unsettledOrders) {
+        if (order.payment_reference) {
+          await verifyPayment({
+            reference: order.payment_reference,
+            correlationId
+          }).catch(err => {
+            console.error(`[TraceID: ${correlationId}] Error reconciling Order #${order.id}:`, err);
+          });
+        }
+      }
+    } catch (err) {
+      console.error(`[TraceID: ${correlationId}] Reconciliation job failed:`, err);
+    } finally {
+      const client = store.get('client');
+      if (client) {
+        client.release();
       }
     }
-  } catch (err) {
-    console.error(`[TraceID: ${correlationId}] Reconciliation job failed:`, err);
-  }
+  });
 };
 
 const scheduleReconciliation = () => {

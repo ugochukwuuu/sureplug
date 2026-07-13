@@ -1,29 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import sqlite3 from 'sqlite3';
-import path from 'path';
+import pg from 'pg';
 import { spawn } from 'child_process';
 import crypto from 'crypto';
 
-const dbPath = path.resolve('server/db/sureplug.db');
-const db = new sqlite3.Database(dbPath);
+const { Client } = pg;
 
-const dbGet = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL environment variable is required to run tests.');
+}
+
+const client = new Client({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
+await client.connect();
+
+const dbGet = async (sql, params = []) => {
+  let count = 0;
+  const convertedSql = sql.replace(/\?/g, () => {
+    count++;
+    return `$${count}`;
   });
+  const result = await client.query(convertedSql, params);
+  return result.rows[0] !== undefined ? result.rows[0] : undefined;
 };
 
-const dbRun = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve({ id: this.lastID, changes: this.changes });
-    });
+const dbRun = async (sql, params = []) => {
+  let count = 0;
+  const convertedSql = sql.replace(/\?/g, () => {
+    count++;
+    return `$${count}`;
   });
+  const result = await client.query(convertedSql, params);
+  const lastID = result.rows && result.rows[0] && result.rows[0].id ? result.rows[0].id : null;
+  return { id: lastID, changes: result.rowCount || 0 };
 };
 
 // Start server on port 3800 in test mode
@@ -316,4 +328,11 @@ test('Webhook Settlement under Stock Depletion Interval', async () => {
 
   // Restore stock
   await dbRun('UPDATE products SET stock_quantity = ?, is_available = 1 WHERE id = ?', [initialStock, targetId]);
+});
+
+test.after(async () => {
+  if (serverProcess) {
+    serverProcess.kill();
+  }
+  await client.end();
 });

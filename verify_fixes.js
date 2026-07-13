@@ -1,25 +1,37 @@
-import sqlite3 from 'sqlite3';
-import path from 'path';
+import pg from 'pg';
 
-const dbPath = path.resolve('server/db/sureplug.db');
-const db = new sqlite3.Database(dbPath);
+const { Client } = pg;
 
-const dbGet = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL environment variable is required to run tests.');
+}
+
+const client = new Client({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
+await client.connect();
+
+const dbGet = async (sql, params = []) => {
+  let count = 0;
+  const convertedSql = sql.replace(/\?/g, () => {
+    count++;
+    return `$${count}`;
   });
+  const result = await client.query(convertedSql, params);
+  return result.rows[0] !== undefined ? result.rows[0] : undefined;
 };
 
-const dbRun = (sql, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve({ id: this.lastID, changes: this.changes });
-    });
+const dbRun = async (sql, params = []) => {
+  let count = 0;
+  const convertedSql = sql.replace(/\?/g, () => {
+    count++;
+    return `$${count}`;
   });
+  const result = await client.query(convertedSql, params);
+  const lastID = result.rows && result.rows[0] && result.rows[0].id ? result.rows[0].id : null;
+  return { id: lastID, changes: result.rowCount || 0 };
 };
 
 async function runTests() {
@@ -66,7 +78,7 @@ async function runTests() {
   console.log('--- Testing Fix 3: /api/checkout and Stock Deduction ---');
   try {
     // Find an available product with stock > 0
-    const testProd = await dbGet('SELECT id, title, stock_quantity FROM products WHERE is_available = 1 AND stock_quantity > 0 LIMIT 1');
+    const testProd = await dbGet('SELECT id, title, stock_quantity FROM products WHERE is_available = TRUE AND stock_quantity > 0 LIMIT 1');
     if (!testProd) {
       console.log('FAIL: No available products in the database with stock > 0 to run checkout test!');
     } else {
@@ -96,7 +108,7 @@ async function runTests() {
       console.log(`Checkout response status: ${checkoutRes.status}`);
       console.log(`Checkout response payload:`, checkoutData);
 
-      const pAfter = await dbGet('SELECT stock_quantity FROM products WHERE id = ?', [targetId]);
+      const pAfter = await dbGet('SELECT stock_quantity FROM products WHERE id = $1', [targetId]);
       console.log(`Product details after checkout: Stock: ${pAfter.stock_quantity}`);
 
       if (pAfter.stock_quantity === testProd.stock_quantity - 1) {
@@ -144,13 +156,13 @@ async function runTests() {
   try {
     // 1. Create a dummy admin in admins table
     // Let's check if 'revoked_admin@example.com' exists, delete it first
-    await dbRun('DELETE FROM admins WHERE email = ?', ['revoked_admin@example.com']);
-    await dbRun('DELETE FROM allowed_emails WHERE email = ?', ['revoked_admin@example.com']);
+    await dbRun('DELETE FROM admins WHERE email = $1', ['revoked_admin@example.com']);
+    await dbRun('DELETE FROM allowed_emails WHERE email = $1', ['revoked_admin@example.com']);
 
     // Hash dummy password 'dummy123'
     const bcrypt = await import('bcrypt');
     const hashedPassword = await bcrypt.default.hash('dummy123', 10);
-    await dbRun('INSERT INTO admins (email, password) VALUES (?, ?)', ['revoked_admin@example.com', hashedPassword]);
+    await dbRun('INSERT INTO admins (email, password) VALUES ($1, $2)', ['revoked_admin@example.com', hashedPassword]);
 
     console.log('Admin account registered directly in database, but not in allowed_emails table.');
 
@@ -172,12 +184,12 @@ async function runTests() {
     }
 
     // Clean up
-    await dbRun('DELETE FROM admins WHERE email = ?', ['revoked_admin@example.com']);
+    await dbRun('DELETE FROM admins WHERE email = $1', ['revoked_admin@example.com']);
   } catch (err) {
     console.error('Error during Fix 7 test:', err);
   }
   console.log('\n=== FIX VERIFICATION TESTS COMPLETED ===');
-  db.close();
+  await client.end();
 }
 
 runTests();
