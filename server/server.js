@@ -211,7 +211,7 @@ app.get('/api/products', async (req, res) => {
 
     // Availability filter (general storefront only shows available items)
     if (includeUnavailable !== 'true') {
-      conditions.push('p.is_available = 1');
+      conditions.push('p.is_available = TRUE');
     }
 
     // Category filter
@@ -1156,7 +1156,7 @@ app.post('/api/checkout', rateLimiter(15, 60000), async (req, res) => {
         return res.status(400).json({ error: `Product with ID ${item.id} not found.` });
       }
 
-      if (product.is_available === 0 || !product.is_available) {
+      if (product.is_available === false || !product.is_available) {
         return res.status(400).json({ error: 'Sorry, this product is no longer available.' });
       }
 

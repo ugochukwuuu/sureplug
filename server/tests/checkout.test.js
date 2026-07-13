@@ -101,7 +101,7 @@ test('Fix 2: Comma-Separated Budget Parser Matches Correctly', async () => {
 });
 
 test('Checkout Idempotency Keys & Server Calculations', async () => {
-  const testProd = await dbGet('SELECT id, title, price, stock_quantity FROM products WHERE is_available = 1 AND stock_quantity > 0 LIMIT 1');
+  const testProd = await dbGet('SELECT id, title, price, stock_quantity FROM products WHERE is_available = TRUE AND stock_quantity > 0 LIMIT 1');
   assert.ok(testProd, 'Should locate an active product');
 
   const idempotencyKey = crypto.randomUUID();
@@ -163,7 +163,7 @@ test('Checkout Idempotency Keys & Server Calculations', async () => {
 });
 
 test('Webhook Web Signature, Deduplication & Atomic Settlements', async () => {
-  const testProd = await dbGet('SELECT id, title, price, stock_quantity FROM products WHERE is_available = 1 AND stock_quantity > 2 LIMIT 1');
+  const testProd = await dbGet('SELECT id, title, price, stock_quantity FROM products WHERE is_available = TRUE AND stock_quantity > 2 LIMIT 1');
   assert.ok(testProd, 'Should locate an active product with stock');
 
   const initialStock = testProd.stock_quantity;
@@ -257,7 +257,7 @@ test('Webhook Web Signature, Deduplication & Atomic Settlements', async () => {
 });
 
 test('Webhook Settlement under Stock Depletion Interval', async () => {
-  const testProd = await dbGet('SELECT id, title, price, stock_quantity FROM products WHERE is_available = 1 AND stock_quantity > 0 LIMIT 1');
+  const testProd = await dbGet('SELECT id, title, price, stock_quantity FROM products WHERE is_available = TRUE AND stock_quantity > 0 LIMIT 1');
   assert.ok(testProd, 'Should locate an active product');
 
   const targetId = testProd.id;
@@ -288,7 +288,7 @@ test('Webhook Settlement under Stock Depletion Interval', async () => {
   const paymentRef = checkoutData.paymentReference;
 
   // Deplete stock in another transaction (simulating stock depletion in the interval before payment)
-  await dbRun('UPDATE products SET stock_quantity = 0, is_available = 0 WHERE id = ?', [targetId]);
+  await dbRun('UPDATE products SET stock_quantity = 0, is_available = FALSE WHERE id = ?', [targetId]);
 
   // Trigger webhook
   const webhookPayload = {
@@ -327,7 +327,7 @@ test('Webhook Settlement under Stock Depletion Interval', async () => {
   assert.strictEqual(finalStock.stock_quantity, 0);
 
   // Restore stock
-  await dbRun('UPDATE products SET stock_quantity = ?, is_available = 1 WHERE id = ?', [initialStock, targetId]);
+  await dbRun('UPDATE products SET stock_quantity = ?, is_available = TRUE WHERE id = ?', [initialStock, targetId]);
 });
 
 test.after(async () => {
