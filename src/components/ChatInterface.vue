@@ -2,7 +2,7 @@
 import { ref, onMounted, nextTick, watch } from 'vue';
 import { useChatStore } from '../stores/chat';
 import { useRouter } from 'vue-router';
-import { brand } from '@/config/brand.js';
+import { brandConfig as brand } from '@/services/brandService.js';
 
 const chatStore = useChatStore();
 const router = useRouter();
@@ -72,7 +72,7 @@ const getImageUrl = (images) => {
     <!-- Header -->
     <div class="chat-header">
       <div class="chat-header-left">
-        <img :src="brand.logo" :alt="`${brand.name} Logo`" class="logo-image-sub" />
+        <img :src="brand.logo" :alt="`${brand.brand_name} Logo`" class="logo-image-sub" />
         <div class="chat-header-divider"></div>
         <span class="chat-header-label">AI Recommender</span>
       </div>

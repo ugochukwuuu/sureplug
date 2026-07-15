@@ -1,7 +1,9 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { brand } from '@/config/brand.js';
+import { brandConfig as brand, applyTheme } from '@/services/brandService.js';
+import classicLogo from '@/assets/classic/logo.png';
+import minimalLogo from '@/assets/minimal/logo.png';
 import { mockProducts } from '../../mockProducts';
 
 const router = useRouter();
@@ -293,7 +295,125 @@ onMounted(() => {
   loadCategories();
   loadOrders();
   loadAdminReviews();
+  fetchThemes();
+  fetchBrandData();
 });
+
+// Brand Settings Console State & Actions
+const formBrand = reactive({
+  brand_name: '',
+  tagline: '',
+  support_phone: '',
+  support_email: '',
+  website_url: '',
+  active_theme: 'classic',
+  instagram: '',
+  twitter: '',
+  tiktok: '',
+  youtube: '',
+  whatsapp_number: ''
+});
+
+const themesList = ref({});
+
+const toast = reactive({
+  message: '',
+  type: 'success',
+  visible: false
+});
+
+const showToast = (message, type = 'success') => {
+  toast.message = message;
+  toast.type = type;
+  toast.visible = true;
+  setTimeout(() => {
+    toast.visible = false;
+  }, 4000);
+};
+
+const activeThemeColors = computed(() => {
+  const themeKey = formBrand.active_theme || 'classic';
+  return themesList.value[themeKey] || {};
+});
+
+const fetchThemes = async () => {
+  try {
+    const res = await fetch('/api/config/themes');
+    if (res.ok) {
+      themesList.value = await res.json();
+    }
+  } catch (err) {
+    console.error('Failed to fetch themes:', err);
+  }
+};
+
+const fetchBrandData = async () => {
+  try {
+    const res = await fetch('/api/config/brand');
+    if (res.ok) {
+      const data = await res.json();
+      Object.assign(formBrand, data);
+    }
+  } catch (err) {
+    console.error('Failed to fetch brand data:', err);
+  }
+};
+
+const getLogoForTheme = (themeKey) => {
+  return themeKey === 'minimal' ? minimalLogo : classicLogo;
+};
+
+const saveBrandSettings = async () => {
+  const token = localStorage.getItem('sureplug_admin_token');
+  try {
+    const res = await fetch('/api/admin/config/brand', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(formBrand)
+    });
+    if (res.ok) {
+      const updatedData = await res.json();
+      Object.assign(brand, updatedData);
+      showToast('Brand settings updated. Changes are live instantly.', 'success');
+    } else {
+      const errData = await res.json();
+      showToast(errData.error || 'Failed to update brand settings.', 'error');
+    }
+  } catch (err) {
+    console.error('Failed to save brand settings:', err);
+    showToast('Failed to save brand settings.', 'error');
+  }
+};
+
+const switchTheme = async (themeKey) => {
+  const token = localStorage.getItem('sureplug_admin_token');
+  try {
+    const res = await fetch('/api/admin/config/brand', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ active_theme: themeKey })
+    });
+    if (res.ok) {
+      const updatedData = await res.json();
+      Object.assign(brand, updatedData);
+      formBrand.active_theme = themeKey;
+      applyTheme(themeKey);
+      showToast(`Theme switched to ${themeKey}. Changes are live instantly.`, 'success');
+    } else {
+      const errData = await res.json();
+      showToast(errData.error || 'Failed to switch theme.', 'error');
+    }
+  } catch (err) {
+    console.error('Failed to switch theme:', err);
+    showToast('Failed to switch theme.', 'error');
+  }
+};
 
 // Filter states
 const selectedBrand = ref('All');
@@ -485,6 +605,13 @@ const getImageUrl = (images) => {
       >
         Reviews Moderation
       </button>
+      <button 
+        class="dashboard-tab-btn" 
+        :class="{ active: activeTab === 'brand' }" 
+        @click="activeTab = 'brand'; fetchBrandData();"
+      >
+        Brand Settings
+      </button>
     </div>
 
     <!-- Products Catalog Tab Content -->
@@ -600,7 +727,7 @@ const getImageUrl = (images) => {
               <input 
                 v-model="newAllowedEmail" 
                 type="email" 
-                :placeholder="`e.g. admin.assistant@${brand.name.toLowerCase()}.com`" 
+                :placeholder="`e.g. admin.assistant@${brand.brand_name.toLowerCase()}.com`" 
                 class="form-input allowed-email-input" 
                 required
               />
@@ -1030,6 +1157,142 @@ const getImageUrl = (images) => {
         </div>
       </div>
     </div>
+
+    <!-- Brand Settings Tab Content -->
+    <template v-else-if="activeTab === 'brand'">
+      <div class="brand-settings-container animate-fade-in">
+        <div class="brand-settings-grid">
+          <!-- Left section - Brand Identity form -->
+          <div class="brand-settings-panel card">
+            <h2 class="panel-section-title">Brand Identity</h2>
+            <p class="panel-section-desc">Manage primary details, social channels, and support contacts.</p>
+
+            <form @submit.prevent="saveBrandSettings" class="brand-identity-form">
+              <div class="form-group">
+                <label class="form-label" for="brand_name">Brand Name</label>
+                <input v-model="formBrand.brand_name" type="text" id="brand_name" class="form-input" required />
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="tagline">Tagline</label>
+                <input v-model="formBrand.tagline" type="text" id="tagline" class="form-input" required />
+              </div>
+
+              <div class="form-group-row">
+                <div class="form-group" style="margin-bottom: 20px;">
+                  <label class="form-label" for="support_phone">Support Phone</label>
+                  <input v-model="formBrand.support_phone" type="text" id="support_phone" class="form-input" required />
+                </div>
+                <div class="form-group" style="margin-bottom: 20px;">
+                  <label class="form-label" for="support_email">Support Email</label>
+                  <input v-model="formBrand.support_email" type="email" id="support_email" class="form-input" required />
+                </div>
+              </div>
+
+              <div class="form-group-row">
+                <div class="form-group" style="margin-bottom: 20px;">
+                  <label class="form-label" for="website_url">Website URL</label>
+                  <input v-model="formBrand.website_url" type="url" id="website_url" class="form-input" required />
+                </div>
+                <div class="form-group" style="margin-bottom: 20px;">
+                  <label class="form-label" for="whatsapp_number">WhatsApp Number</label>
+                  <input v-model="formBrand.whatsapp_number" type="text" id="whatsapp_number" class="form-input" />
+                  <span class="form-hint">Must be in international format without the plus sign (e.g., 2348000000000)</span>
+                </div>
+              </div>
+
+              <h3 class="subsection-title">Social Handles</h3>
+              <div class="form-group-grid">
+                <div class="form-group" style="margin-bottom: 20px;">
+                  <label class="form-label" for="instagram">Instagram</label>
+                  <input v-model="formBrand.instagram" type="text" id="instagram" class="form-input" placeholder="@handle" />
+                </div>
+                <div class="form-group" style="margin-bottom: 20px;">
+                  <label class="form-label" for="twitter">Twitter / X</label>
+                  <input v-model="formBrand.twitter" type="text" id="twitter" class="form-input" placeholder="@handle" />
+                </div>
+                <div class="form-group" style="margin-bottom: 20px;">
+                  <label class="form-label" for="tiktok">TikTok</label>
+                  <input v-model="formBrand.tiktok" type="text" id="tiktok" class="form-input" placeholder="@handle" />
+                </div>
+                <div class="form-group" style="margin-bottom: 20px;">
+                  <label class="form-label" for="youtube">YouTube</label>
+                  <input v-model="formBrand.youtube" type="text" id="youtube" class="form-input" placeholder="@handle" />
+                </div>
+              </div>
+
+              <button type="submit" class="btn btn-navy save-brand-btn">
+                Save Brand Settings
+              </button>
+            </form>
+          </div>
+
+          <!-- Right section - Theme Switcher -->
+          <div class="brand-settings-panel card">
+            <h2 class="panel-section-title">Visual Theme</h2>
+            <p class="panel-section-desc">Select active color schema and typography tokens for the storefront.</p>
+
+            <div class="themes-selector-grid">
+              <div 
+                v-for="(themeTokens, themeKey) in themesList" 
+                :key="themeKey"
+                class="theme-card"
+                :class="{ active: formBrand.active_theme === themeKey }"
+                @click="switchTheme(themeKey)"
+              >
+                <div class="theme-card-header">
+                  <span class="theme-name">{{ themeKey.toUpperCase() }}</span>
+                  <span v-if="formBrand.active_theme === themeKey" class="active-badge">✓</span>
+                </div>
+
+                <!-- Swatches -->
+                <div class="theme-swatch-strip">
+                  <div class="swatch" :style="{ backgroundColor: themeTokens['--color-secondary'] }" title="Secondary"></div>
+                  <div class="swatch" :style="{ backgroundColor: themeTokens['--color-primary'] }" title="Primary"></div>
+                  <div class="swatch" :style="{ backgroundColor: themeTokens['--color-accent'] }" title="Accent"></div>
+                </div>
+
+                <div class="theme-card-body">
+                  <p class="theme-font-label">Display Font: <span class="font-name">{{ themeTokens['--font-display'] }}</span></p>
+                  <p class="theme-font-label">Body Font: <span class="font-name">{{ themeTokens['--font-body'] }}</span></p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Real-Time live preview strip -->
+        <div class="live-preview-section card">
+          <h3 class="preview-title">Real-Time Storefront Preview</h3>
+          <p class="preview-desc">This is how your storefront navbar will render live with the above configurations.</p>
+          
+          <div class="preview-navbar" :style="{
+            backgroundColor: activeThemeColors['--color-secondary'] || '#1E0E62',
+            borderColor: activeThemeColors['--color-primary'] || '#FFB800'
+          }">
+            <div class="preview-navbar-left">
+              <img :src="getLogoForTheme(formBrand.active_theme)" class="preview-logo-img" />
+              <span class="preview-logo-text" :style="{
+                color: '#FFFFFF',
+                fontFamily: activeThemeColors['--font-display'] || 'Shrikhand'
+              }">
+                {{ formBrand.brand_name || 'Sureplug' }}
+              </span>
+            </div>
+            <div class="preview-navbar-right">
+              <span class="preview-nav-item" :style="{ color: activeThemeColors['--color-primary'] || '#FFB800' }">Marketplace</span>
+              <span class="preview-nav-item" style="color: #FFFFFF">Sell Device</span>
+              <span class="preview-nav-item" style="color: #FFFFFF">Track Order</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Custom Toast Notification -->
+    <div v-if="toast.visible" class="toast-notification" :class="toast.type">
+      <span class="toast-message">{{ toast.message }}</span>
+    </div>
   </div>
 </template>
 
@@ -1308,6 +1571,19 @@ const getImageUrl = (images) => {
   align-items: center;
 }
 
+@media (max-width: 576px) {
+  .header-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .header-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 .logout-btn {
   display: inline-flex;
   align-items: center;
@@ -1327,6 +1603,14 @@ const getImageUrl = (images) => {
   border-bottom: 2px solid var(--color-border-light);
   margin-bottom: 28px;
   padding-bottom: 2px;
+  overflow-x: auto;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.dashboard-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .dashboard-tab-btn {
@@ -1339,6 +1623,8 @@ const getImageUrl = (images) => {
   cursor: pointer;
   position: relative;
   transition: color 0.2s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .dashboard-tab-btn:hover {
@@ -1403,6 +1689,19 @@ const getImageUrl = (images) => {
 
 .allow-btn {
   white-space: nowrap;
+}
+
+@media (max-width: 576px) {
+  .allowlist-input-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .allowed-email-input {
+    width: 100%;
+  }
+  .allow-btn {
+    width: 100%;
+  }
 }
 
 .error-text {
@@ -1808,5 +2107,280 @@ input:checked + .slider:before {
   border-top-color: var(--color-navy);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+/* Brand Settings Styles */
+.brand-settings-container {
+  margin-top: 10px;
+}
+.brand-settings-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+@media (max-width: 992px) {
+  .brand-settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.brand-settings-panel {
+  background-color: var(--color-white);
+  border: 1px solid var(--color-border-light);
+  border-radius: 16px;
+  padding: 32px;
+}
+.panel-section-title {
+  font-family: var(--font-body);
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--color-slate-headings);
+  margin-bottom: 6px;
+}
+.panel-section-desc {
+  font-size: 13.5px;
+  color: var(--color-muted-grey);
+  margin-bottom: 24px;
+}
+.form-group-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 576px) {
+  .form-group-row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+.form-group-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 576px) {
+  .form-group-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.form-hint {
+  font-size: 11.5px;
+  color: var(--color-muted-grey);
+  margin-top: 4px;
+  display: block;
+}
+.subsection-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--color-slate-headings);
+  margin: 20px 0 12px 0;
+  border-bottom: 1.5px solid var(--color-border-light);
+  padding-bottom: 6px;
+}
+.save-brand-btn {
+  margin-top: 16px;
+  width: 100%;
+}
+
+/* Themes switcher styling */
+.themes-selector-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+.theme-card {
+  border: 2px solid var(--color-border-light);
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+  background-color: var(--color-bg);
+}
+.theme-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--color-navy);
+}
+.theme-card.active {
+  border-color: var(--color-yellow);
+  background-color: var(--color-white);
+  box-shadow: 0 4px 12px rgba(255, 184, 0, 0.1);
+}
+.theme-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.theme-name {
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--color-slate-headings);
+}
+.active-badge {
+  background-color: var(--color-yellow);
+  color: var(--color-navy);
+  font-weight: 800;
+  font-size: 11px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.theme-swatch-strip {
+  display: flex;
+  height: 24px;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+.swatch {
+  flex: 1;
+}
+.theme-card-body {
+  font-size: 12px;
+  color: var(--color-muted-grey);
+}
+.theme-font-label {
+  margin: 2px 0;
+}
+.font-name {
+  font-weight: 600;
+  color: var(--color-slate-headings);
+}
+
+/* Live Preview styles */
+.live-preview-section {
+  background-color: var(--color-white);
+  border: 1px solid var(--color-border-light);
+  border-radius: 16px;
+  padding: 24px;
+  margin-top: 24px;
+}
+.preview-title {
+  font-family: var(--font-body);
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--color-slate-headings);
+  margin-bottom: 4px;
+}
+.preview-desc {
+  font-size: 13px;
+  color: var(--color-muted-grey);
+  margin-bottom: 16px;
+}
+.preview-navbar {
+  border-radius: 12px;
+  padding: 16px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+  border-bottom: 3px solid transparent;
+  transition: all 0.3s ease;
+}
+.preview-navbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.preview-logo-img {
+  height: 24px;
+  width: auto;
+  object-fit: contain;
+}
+.preview-logo-text {
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+}
+.preview-navbar-right {
+  display: flex;
+  gap: 16px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.preview-nav-item {
+  cursor: default;
+}
+
+@media (max-width: 576px) {
+  .panel-section {
+    padding: 16px !important;
+  }
+  .brand-settings-panel {
+    padding: 16px !important;
+  }
+  .preview-navbar {
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px !important;
+    align-items: center;
+  }
+  .preview-navbar-right {
+    justify-content: center;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  
+  /* Console controls responsiveness */
+  .console-controls-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
+  .console-search-box {
+    max-width: 100%;
+    width: 100%;
+  }
+  .console-filters-wrapper {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    width: 100%;
+  }
+  .console-filter-item {
+    justify-content: space-between;
+    width: 100%;
+  }
+  .console-filter-select {
+    flex: 1;
+    min-width: 0 !important;
+  }
+}
+
+/* Toast styling */
+.toast-notification {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  padding: 16px 24px;
+  border-radius: 8px;
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+  box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+  z-index: 1100;
+  animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.toast-notification.success {
+  background-color: var(--color-green);
+}
+.toast-notification.error {
+  background-color: var(--color-red);
+}
+@keyframes slideIn {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 </style>

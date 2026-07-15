@@ -23,7 +23,8 @@ import { authMiddleware } from './middleware/auth.js';
 import { categoriesList } from './config/categories.js';
 import { initializePayment, processWebhook, verifyPayment } from './payments/paymentService.js';
 import { sendOrderConfirmationEmail, sendShipmentNotificationEmail } from './services/email.js';
-import { brand } from './config/brand.js';
+import { getBrand, invalidateBrandCache } from './services/brandCache.js';
+import { themes } from './config/themes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -123,8 +124,94 @@ initDb().then(() => {
 });
 
 // API health endpoint
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', message: `${brand.name} backend active` });
+app.get('/api/health', async (req, res) => {
+  try {
+    const brandData = await getBrand();
+    res.json({ status: 'ok', message: `${brandData.brand_name} backend active` });
+  } catch (err) {
+    res.status(500).json({ error: 'Backend error' });
+  }
+});
+
+// GET /api/config/brand - Public brand settings and theme details
+app.get('/api/config/brand', async (req, res) => {
+  try {
+    const brandData = await getBrand();
+    res.json({
+      ...brandData,
+      themes
+    });
+  } catch (err) {
+    console.error('Error fetching brand config:', err);
+    res.status(500).json({ error: 'Failed to fetch brand config' });
+  }
+});
+
+// GET /api/config/themes - Public list of available themes
+app.get('/api/config/themes', (req, res) => {
+  res.json(themes);
+});
+
+// PUT /api/admin/config/brand - Admin protected brand updates
+app.put('/api/admin/config/brand', authMiddleware, async (req, res) => {
+  try {
+    const active_theme = req.body.active_theme;
+    if (active_theme && !themes[active_theme]) {
+      return res.status(400).json({ error: `Invalid visual theme: ${active_theme}. Must be one of: ${Object.keys(themes).join(', ')}` });
+    }
+
+    const currentBrand = await getBrand();
+    const updatedBy = req.admin?.email || 'admin';
+
+    const fieldsToUpdate = [
+      'brand_name',
+      'tagline',
+      'support_phone',
+      'support_email',
+      'website_url',
+      'active_theme',
+      'instagram',
+      'twitter',
+      'tiktok',
+      'youtube',
+      'whatsapp_number'
+    ];
+
+    const updates = [];
+    const values = [];
+    let placeholderIndex = 1;
+
+    for (const field of fieldsToUpdate) {
+      if (req.body[field] !== undefined) {
+        updates.push(`${field} = $${placeholderIndex}`);
+        values.push(req.body[field]);
+        placeholderIndex++;
+      }
+    }
+
+    if (updates.length > 0) {
+      updates.push(`updated_by = $${placeholderIndex}`);
+      values.push(updatedBy);
+      placeholderIndex++;
+      
+      updates.push(`updated_at = CURRENT_TIMESTAMP`);
+
+      const rowId = currentBrand.id || 1;
+      values.push(rowId);
+      const query = `UPDATE brand_config SET ${updates.join(', ')} WHERE id = $${placeholderIndex} RETURNING *`;
+      const result = await dbRun(query, values);
+      
+      invalidateBrandCache();
+      
+      const updatedBrand = result.rows && result.rows[0] ? result.rows[0] : await getBrand();
+      res.json(updatedBrand);
+    } else {
+      res.json(currentBrand);
+    }
+  } catch (err) {
+    console.error('Error updating brand config:', err);
+    res.status(500).json({ error: 'Failed to update brand config' });
+  }
 });
 
 // Categories config endpoint
@@ -419,7 +506,7 @@ app.get('/api/products/:id/reviews', async (req, res) => {
     );
 
     const stats = await dbGet(
-      `SELECT COUNT(*) as count, AVG(rating) as avgRating 
+      `SELECT COUNT(*) as count, AVG(rating) as "avgRating" 
        FROM reviews 
        WHERE product_id = $1 AND is_flagged = FALSE`,
       [productId]
@@ -427,8 +514,8 @@ app.get('/api/products/:id/reviews', async (req, res) => {
 
     res.json({
       reviews,
-      totalReviewCount: stats ? stats.count : 0,
-      averageRating: stats && stats.avgRating ? parseFloat(stats.avgRating.toFixed(1)) : 0
+      totalReviewCount: stats ? parseInt(stats.count, 10) : 0,
+      averageRating: stats && stats.avgRating ? parseFloat(parseFloat(stats.avgRating).toFixed(1)) : 0
     });
   } catch (err) {
     console.error('Error fetching reviews:', err);
@@ -813,6 +900,7 @@ app.post('/api/ai/recommend', async (req, res) => {
   }
 
   try {
+    const brandData = await getBrand();
     const products = (await getAllProducts()).filter(p => p.is_available);
 
     // Check if Gemini API key exists
@@ -822,7 +910,7 @@ app.post('/api/ai/recommend', async (req, res) => {
         console.log('Sending request to Gemini API...');
         
         // Prepare prompt
-        const systemPrompt = `You are the ${brand.name} AI Recommender, a helpful assistant finding the best tech devices (laptops, phones, tablets, accessories) for university students.
+        const systemPrompt = `You are the ${brandData.brand_name} AI Recommender, a helpful assistant finding the best tech devices (laptops, phones, tablets, accessories) for university students.
 You are given a list of available products in the store's database, as well as the chat history.
 
 Your goal is to:
@@ -1717,6 +1805,11 @@ app.get(/.*/, (req, res, next) => {
 
 // Watched reload trigger comment
 
-app.listen(PORT, () => {
-  console.log(`${brand.name} Express server running on http://localhost:${PORT}`);
+app.listen(PORT, async () => {
+  try {
+    const brandData = await getBrand();
+    console.log(`${brandData.brand_name} Express server running on http://localhost:${PORT}`);
+  } catch (err) {
+    console.log(`Express server running on http://localhost:${PORT}`);
+  }
 });

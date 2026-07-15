@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import test from 'node:test';
 import assert from 'node:assert';
 import pg from 'pg';
@@ -78,14 +79,6 @@ test.before(() => {
       if (!started) reject(new Error('Server failed to start in time.'));
     }, 10000);
   });
-});
-
-test.after(() => {
-  if (serverProcess) {
-    console.log('Stopping test server...');
-    serverProcess.kill();
-  }
-  db.close();
 });
 
 test('Fix 2: Comma-Separated Budget Parser Matches Correctly', async () => {

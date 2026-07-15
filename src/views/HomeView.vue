@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { brand } from '@/config/brand.js';
+import { brandConfig as brand } from '@/services/brandService.js';
 import { mockProducts } from '../mockProducts';
 import ProductCard from '../components/ProductCard.vue';
 
@@ -103,7 +103,7 @@ const selectTag = (tag) => {
               <span class="circle-badge-main">AUTHENTIC</span>
               <span class="circle-badge-sub">GUARANTEED</span>
             </div>
-            <img :src="brand.heroMockup" :alt="`${brand.name} Hero Devices Mockup`" class="hero-mockup-img" />
+            <img :src="brand.heroMockup" :alt="`${brand.brand_name} Hero Devices Mockup`" class="hero-mockup-img" />
           </div>
         </div>
       </div>
@@ -196,7 +196,7 @@ const selectTag = (tag) => {
           </router-link>
         </div>
         <div class="banner-graphic-block">
-          <img :src="brand.recommendationMockup" :alt="`${brand.name} AI Recommendation`" class="banner-mockup-img" />
+          <img :src="brand.recommendationMockup" :alt="`${brand.brand_name} AI Recommendation`" class="banner-mockup-img" />
         </div>
       </div>
     </section>

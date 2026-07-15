@@ -6,6 +6,16 @@ const seed = async () => {
     console.log('Initializing database tables...');
     await initDb();
 
+    console.log('Seeding brand config...');
+    const brandRowExists = await dbGet('SELECT id FROM brand_config LIMIT 1');
+    if (!brandRowExists) {
+      await dbRun(`
+        INSERT INTO brand_config (brand_name, tagline, support_phone, support_email, active_theme)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT DO NOTHING
+      `, ['Sureplug', 'Authentic tech. Trusted people. Zero stress.', '2348000000000', 'hello@sureplug.com', 'classic']);
+    }
+
     console.log('Seeding mock brands...');
     for (const prod of mockProducts) {
       if (prod.brand) {

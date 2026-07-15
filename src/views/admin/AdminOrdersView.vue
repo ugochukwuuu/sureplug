@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { brand } from '@/config/brand.js';
+import { brandConfig as brand } from '@/services/brandService.js';
 
 const router = useRouter();
 

@@ -1,5 +1,5 @@
 <script setup>
-import { brand } from '@/config/brand.js';
+import { brandConfig as brand } from '@/services/brandService.js';
 </script>
 
 <template>
@@ -8,18 +8,18 @@ import { brand } from '@/config/brand.js';
       <!-- Info Brand Column -->
       <div class="footer-brand-col">
         <div class="footer-logo">
-          <img :src="brand.logo" :alt="`${brand.name} Logo`" class="logo-image" />
-          <span class="logo-text">{{ brand.name }}</span>
+          <img :src="brand.logo" :alt="`${brand.brand_name} Logo`" class="logo-image" />
+          <span class="logo-text">{{ brand.brand_name }}</span>
         </div>
         <p class="brand-tagline">{{ brand.tagline }}</p>
         <div class="social-links">
-          <a :href="`https://instagram.com/${brand.socialHandles.instagram?.replace('@', '')}`" target="_blank" class="social-link" aria-label="Instagram">
+          <a :href="`https://instagram.com/${brand.instagram?.replace('@', '')}`" target="_blank" class="social-link" aria-label="Instagram">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>
           </a>
-          <a :href="`https://twitter.com/${brand.socialHandles.twitter?.replace('@', '')}`" target="_blank" class="social-link" aria-label="Twitter">
+          <a :href="`https://twitter.com/${brand.twitter?.replace('@', '')}`" target="_blank" class="social-link" aria-label="Twitter">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z"></path></svg>
           </a>
-          <a :href="`https://tiktok.com/${brand.socialHandles.tiktok?.replace('@', '')}`" target="_blank" class="social-link" aria-label="TikTok">
+          <a :href="`https://tiktok.com/${brand.tiktok?.replace('@', '')}`" target="_blank" class="social-link" aria-label="TikTok">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5"></path></svg>
           </a>
         </div>
@@ -54,7 +54,7 @@ import { brand } from '@/config/brand.js';
         <h4 class="footer-col-title">Support</h4>
         <ul class="footer-list">
           <li><a href="#">Help Center</a></li>
-          <li><a :href="`mailto:${brand.supportEmail}`">Contact Us</a></li>
+          <li><a :href="`mailto:${brand.support_email}`">Contact Us</a></li>
           <li><a href="#">Shipping & Delivery</a></li>
           <li><a href="#">Returns & Refunds</a></li>
           <li><a href="#">Terms & Conditions</a></li>
@@ -77,7 +77,7 @@ import { brand } from '@/config/brand.js';
     <!-- Footnotes copyright -->
     <div class="footer-bottom">
       <div class="footer-bottom-content">
-        <p class="copyright">© 2025 {{ brand.name }}. All rights reserved.</p>
+        <p class="copyright">© 2025 {{ brand.brand_name }}. All rights reserved.</p>
         <div class="footer-bottom-badge">
           <span>Built for students. Backed by trust.</span>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="lock-icon"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>

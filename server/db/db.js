@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import pg from 'pg';
 import { AsyncLocalStorage } from 'async_hooks';
 
@@ -237,6 +238,32 @@ export const initDb = async () => {
       UNIQUE (product_id, order_reference)
     )
   `);
+
+  // 9. Create brand_config table
+  await dbRun(`
+    CREATE TABLE IF NOT EXISTS brand_config (
+      id SERIAL PRIMARY KEY,
+      brand_name TEXT NOT NULL DEFAULT 'Sureplug',
+      tagline TEXT NOT NULL DEFAULT 'Authentic tech. Trusted people. Zero stress.',
+      support_phone TEXT NOT NULL DEFAULT '2348000000000',
+      support_email TEXT NOT NULL DEFAULT 'hello@sureplug.com',
+      website_url TEXT NOT NULL DEFAULT 'http://localhost:5173',
+      active_theme TEXT NOT NULL DEFAULT 'classic',
+      instagram TEXT DEFAULT '@sureplug',
+      twitter TEXT DEFAULT '@sureplug',
+      tiktok TEXT DEFAULT '@sureplug',
+      youtube TEXT DEFAULT '@sureplug',
+      whatsapp_number TEXT DEFAULT '2348000000000',
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_by TEXT DEFAULT 'system'
+    )
+  `);
+
+  const brandCount = await dbGet('SELECT COUNT(*) as count FROM brand_config');
+  if (parseInt(brandCount.count, 10) === 0) {
+    await dbRun('INSERT INTO brand_config DEFAULT VALUES');
+  }
+
 
   // Helper to dynamically check if a column exists (PostgreSQL replacement for PRAGMA table_info)
   const checkColumnExists = async (tableName, columnName) => {

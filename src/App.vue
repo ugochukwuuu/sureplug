@@ -3,8 +3,7 @@ import { ref, computed, onMounted, onErrorCaptured } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Navbar from './components/Navbar.vue';
 import Footer from './components/Footer.vue';
-import { brand } from '@/config/brand.js';
-import { themes } from '@/config/themes.js';
+import { brandConfig as brand, loadBrandConfig } from '@/services/brandService.js';
 
 const route = useRoute();
 const router = useRouter();
@@ -20,11 +19,8 @@ const handleLogout = () => {
 };
 
 // Theme loader
-onMounted(() => {
-  const theme = themes[brand.theme] || themes['classic'];
-  Object.entries(theme).forEach(([key, value]) => {
-    document.documentElement.style.setProperty(key, value);
-  });
+onMounted(async () => {
+  await loadBrandConfig();
 });
 
 // General Error Boundary
@@ -63,8 +59,8 @@ const handleRefresh = () => {
     <header v-else-if="isCheckout" class="checkout-header">
       <div class="checkout-header-content">
         <router-link to="/" class="checkout-logo">
-          <img :src="brand.logo" :alt="`${brand.name} Logo`" class="logo-image" />
-          <span class="logo-text">{{ brand.name }}</span>
+          <img :src="brand.logo" :alt="`${brand.brand_name} Logo`" class="logo-image" />
+          <span class="logo-text">{{ brand.brand_name }}</span>
         </router-link>
         <div class="checkout-secure-title">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="lock-icon"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
@@ -77,8 +73,8 @@ const handleRefresh = () => {
     <header v-else class="admin-header">
       <div class="admin-header-content">
         <router-link to="/" class="admin-logo">
-          <img :src="brand.logo" :alt="`${brand.name} Logo`" class="logo-image" />
-          <span class="logo-text">{{ brand.name }}</span>
+          <img :src="brand.logo" :alt="`${brand.brand_name} Logo`" class="logo-image" />
+          <span class="logo-text">{{ brand.brand_name }}</span>
           <span class="admin-logo-tag">Admin</span>
         </router-link>
         <nav v-if="showAdminNav" class="admin-nav-links">
@@ -100,7 +96,7 @@ const handleRefresh = () => {
     
     <footer v-else-if="isCheckout" class="checkout-footer">
       <div class="checkout-footer-content">
-        <router-link to="/" class="checkout-footer-logo">{{ brand.name }}</router-link>
+        <router-link to="/" class="checkout-footer-logo">{{ brand.brand_name }}</router-link>
         <div class="checkout-footer-links">
           <a href="#">Privacy Policy</a>
           <span>·</span>
@@ -108,7 +104,7 @@ const handleRefresh = () => {
           <span>·</span>
           <a href="#">Help Center</a>
         </div>
-        <p class="checkout-footer-copy">© 2025 {{ brand.name }}. All rights reserved.</p>
+        <p class="checkout-footer-copy">© 2025 {{ brand.brand_name }}. All rights reserved.</p>
       </div>
     </footer>
   </div>
@@ -295,6 +291,16 @@ const handleRefresh = () => {
 @media (max-width: 768px) {
   .checkout-header, .admin-header {
     padding: 16px 24px;
+  }
+  .admin-header-content {
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  .admin-nav-links {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
   }
 }
 </style>

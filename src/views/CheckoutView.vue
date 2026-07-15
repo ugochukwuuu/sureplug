@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useCartStore } from '../stores/cart';
 import { useRouter, useRoute } from 'vue-router';
-import { brand } from '@/config/brand.js';
+import { brandConfig as brand } from '@/services/brandService.js';
 
 const cartStore = useCartStore();
 const router = useRouter();
@@ -356,7 +356,7 @@ const formatPrice = (val) => {
             </div>
             
             <a 
-              :href="`https://wa.me/${brand.supportPhone?.replace(/\D/g, '')}?text=Hi%20${encodeURIComponent(brand.name)}%2C%20I%20want%20to%20place%20an%20order.%20Here%20are%20my%20details%3A`" 
+              :href="`https://wa.me/${(brand.whatsapp_number || brand.support_phone)?.replace(/\D/g, '')}?text=Hi%20${encodeURIComponent(brand.brand_name)}%2C%20I%20want%20to%20place%20an%20order.%20Here%20are%20my%20details%3A`" 
               target="_blank" 
               rel="noopener noreferrer" 
               class="btn-whatsapp-alt"

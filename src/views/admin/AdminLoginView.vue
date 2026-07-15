@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { brand } from '@/config/brand.js';
+import { brandConfig as brand } from '@/services/brandService.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -60,7 +60,7 @@ const handleLogin = async () => {
   <div class="admin-login-view">
     <div class="login-card">
       <div class="login-header">
-        <img :src="brand.logo" :alt="`${brand.name} Logo`" class="login-logo" />
+        <img :src="brand.logo" :alt="`${brand.brand_name} Logo`" class="login-logo" />
         <h1 class="login-title">Admin Access</h1>
         <p class="login-subtitle">Enter credentials to access the merchant console.</p>
       </div>
@@ -78,7 +78,7 @@ const handleLogin = async () => {
             type="email" 
             id="email" 
             class="form-input" 
-            :placeholder="`admin@${brand.name.toLowerCase()}.com`" 
+            :placeholder="`admin@${brand.brand_name.toLowerCase()}.com`" 
             required 
           />
         </div>

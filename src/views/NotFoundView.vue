@@ -1,6 +1,6 @@
 <script setup>
 import { useRouter } from 'vue-router';
-import { brand } from '@/config/brand.js';
+import { brandConfig as brand } from '@/services/brandService.js';
 
 const router = useRouter();
 </script>

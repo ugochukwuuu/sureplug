@@ -1,7 +1,7 @@
 <script setup>
 import { ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { brand } from '@/config/brand.js';
+import { brandConfig as brand } from '@/services/brandService.js';
 
 const router = useRouter();
 const email = ref('');
@@ -62,7 +62,7 @@ const handleRegister = async () => {
   <div class="admin-register-view">
     <div class="register-card">
       <div class="register-header">
-        <img :src="brand.logo" :alt="`${brand.name} Logo`" class="register-logo" />
+        <img :src="brand.logo" :alt="`${brand.brand_name} Logo`" class="register-logo" />
         <h1 class="register-title">Register Admin</h1>
         <p class="register-subtitle">Create a merchant console administrator account.</p>
       </div>

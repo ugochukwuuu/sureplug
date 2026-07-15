@@ -1,5 +1,5 @@
 import { Resend } from 'resend';
-import { brand } from '../config/brand.js';
+import { getBrand } from './brandCache.js';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const resend = RESEND_API_KEY && !RESEND_API_KEY.includes('your_resend_api_key_here') ? new Resend(RESEND_API_KEY) : null;
@@ -15,14 +15,15 @@ export async function sendOrderConfirmationEmail(order) {
   }
 
   try {
+    const brandData = await getBrand();
     const firstName = (order.customer_name || '').split(' ')[0] || 'Customer';
-    const frontendUrl = brand.websiteUrl || 'http://localhost:5173';
+    const frontendUrl = brandData.website_url || 'http://localhost:5173';
     const trackingUrl = `${frontendUrl}/track/${order.payment_reference}`;
     
     // Parse order items
     let items = [];
     try {
-      items = JSON.parse(order.items_json);
+      items = typeof order.items_json === 'string' ? JSON.parse(order.items_json || '[]') : order.items_json;
     } catch (e) {
       console.error('Error parsing items JSON for email:', e);
     }
@@ -71,8 +72,8 @@ export async function sendOrderConfirmationEmail(order) {
         <div style="max-width: 600px; margin: 20px auto; background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
           <!-- Header (Brand colors) -->
           <div style="background-color: #1E0E62; padding: 32px 24px; text-align: center;">
-            <h1 style="margin: 0; color: #FFB800; font-size: 28px; font-weight: bold;">${brand.name}</h1>
-            <p style="margin: 8px 0 0 0; color: #FFFFFF; font-size: 14px; opacity: 0.9;">${brand.tagline}</p>
+            <h1 style="margin: 0; color: #FFB800; font-size: 28px; font-weight: bold;">${brandData.brand_name}</h1>
+            <p style="margin: 8px 0 0 0; color: #FFFFFF; font-size: 14px; opacity: 0.9;">${brandData.tagline}</p>
           </div>
 
           <!-- Body -->
@@ -152,9 +153,9 @@ export async function sendOrderConfirmationEmail(order) {
     console.log(`[Email Service] Attempting to send confirmation email to ${order.customer_email} for order #${order.id}`);
     
     const response = await resend.emails.send({
-      from: `${brand.name} <onboarding@resend.dev>`,
+      from: `${brandData.brand_name} <onboarding@resend.dev>`,
       to: order.customer_email,
-      subject: `Order Confirmed — Your ${brand.name} order is on its way 🎉`,
+      subject: `Order Confirmed — Your ${brandData.brand_name} order is on its way 🎉`,
       html: emailHtml
     });
 
@@ -175,14 +176,15 @@ export async function sendShipmentNotificationEmail(order) {
   }
 
   try {
+    const brandData = await getBrand();
     const firstName = (order.customer_name || '').split(' ')[0] || 'Customer';
-    const frontendUrl = brand.websiteUrl || 'http://localhost:5173';
+    const frontendUrl = brandData.website_url || 'http://localhost:5173';
     const trackingUrl = `${frontendUrl}/track/${order.payment_reference}`;
 
     // Parse order items
     let items = [];
     try {
-      items = JSON.parse(order.items_json);
+      items = typeof order.items_json === 'string' ? JSON.parse(order.items_json || '[]') : order.items_json;
     } catch (e) {
       console.error('Error parsing items JSON for shipment email:', e);
     }
@@ -218,8 +220,8 @@ export async function sendShipmentNotificationEmail(order) {
         <div style="max-width: 600px; margin: 20px auto; background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
           <!-- Header -->
           <div style="background-color: #1E0E62; padding: 32px 24px; text-align: center;">
-            <h1 style="margin: 0; color: #FFB800; font-size: 28px; font-weight: bold;">${brand.name}</h1>
-            <p style="margin: 8px 0 0 0; color: #FFFFFF; font-size: 14px; opacity: 0.9;">${brand.tagline}</p>
+            <h1 style="margin: 0; color: #FFB800; font-size: 28px; font-weight: bold;">${brandData.brand_name}</h1>
+            <p style="margin: 8px 0 0 0; color: #FFFFFF; font-size: 14px; opacity: 0.9;">${brandData.tagline}</p>
           </div>
 
           <!-- Body -->
@@ -284,7 +286,7 @@ export async function sendShipmentNotificationEmail(order) {
             </div>
 
             <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #64748B;">
-              If you have any questions or need to make changes to your delivery, please contact our support team at <a href="mailto:${brand.supportEmail}" style="color: #6366F1; text-decoration: none;">${brand.supportEmail}</a>.
+              If you have any questions or need to make changes to your delivery, please contact our support team at <a href="mailto:${brandData.support_email}" style="color: #6366F1; text-decoration: none;">${brandData.support_email}</a>.
             </p>
           </div>
 
@@ -301,9 +303,9 @@ export async function sendShipmentNotificationEmail(order) {
     console.log(`[Email Service] Attempting to send shipment notification email to ${order.customer_email} for order #${order.id}`);
 
     await resend.emails.send({
-      from: `${brand.name} <onboarding@resend.dev>`,
+      from: `${brandData.brand_name} <onboarding@resend.dev>`,
       to: order.customer_email,
-      subject: `${brand.name} — Your order is on its way!`,
+      subject: `${brandData.brand_name} — Your order is on its way!`,
       html: emailHtml
     });
   } catch (err) {
